@@ -32,5 +32,10 @@ describe("visualizer renderer", () => {
 
     expect(first.byteLength).toBe(320 * 240 * 4);
     expect(digest(first)).toBe(digest(second));
+
+    const earlier = fullTimelineRenderer.render(analysis, 0.2);
+    const earlierDigest = digest(earlier);
+    fullTimelineRenderer.render(analysis, 0.8);
+    expect(digest(earlier)).toBe(earlierDigest);
   });
 });

@@ -1,10 +1,11 @@
 export const ANALYSIS_VERSION = 1;
-export const RENDERER_VERSION = 1;
+export const RENDERER_VERSION = 3;
 
 export interface OutputConfig {
   width: number;
   height: number;
   fps: number;
+  renderScale: number;
   crf: number;
   preset: "ultrafast" | "veryfast" | "fast" | "medium" | "slow";
 }

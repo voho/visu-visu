@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { once } from "node:events";
 import type { ProjectConfig } from "../types.js";
 
+export const DELIVERY_AUDIO_BITRATE = 384_000;
+
 interface EncoderOptions {
   audioPath: string;
   outputPath: string;
@@ -11,6 +13,8 @@ interface EncoderOptions {
   start: number;
   duration: number;
   frameCount: number;
+  inputWidth: number;
+  inputHeight: number;
   overwrite: boolean;
 }
 
@@ -62,7 +66,7 @@ export class FfmpegEncoder {
       "-pixel_format",
       "rgba",
       "-video_size",
-      `${output.width}x${output.height}`,
+      `${options.inputWidth}x${options.inputHeight}`,
       "-framerate",
       String(output.fps),
       "-i",
@@ -80,6 +84,14 @@ export class FfmpegEncoder {
       options.duration.toFixed(6),
       "-frames:v",
       String(options.frameCount),
+    );
+    if (options.inputWidth !== output.width || options.inputHeight !== output.height) {
+      args.push(
+        "-vf",
+        `scale=${output.width}:${output.height}:flags=lanczos,setsar=1`,
+      );
+    }
+    args.push(
       "-c:v",
       "libx264",
       "-preset",
@@ -90,8 +102,18 @@ export class FfmpegEncoder {
       "yuv420p",
       "-c:a",
       "aac",
+      "-profile:a",
+      "aac_low",
+      "-aac_coder",
+      "twoloop",
+      "-aac_ms",
+      "0",
       "-b:a",
-      "256k",
+      `${DELIVERY_AUDIO_BITRATE / 1000}k`,
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
       "-movflags",
       "+faststart",
     );

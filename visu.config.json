@@ -4,8 +4,9 @@
     "width": 1920,
     "height": 1280,
     "fps": 30,
+    "renderScale": 0.5,
     "crf": 18,
-    "preset": "medium"
+    "preset": "veryfast"
   },
   "text": {
     "title": "",

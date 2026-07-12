@@ -2,7 +2,19 @@
 
 `visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first, then renders every video frame from absolute time, cached features, and a seeded visual plan.
 
-The initial preset is **Monochrome Signal Dream**: a slow grayscale noise-and-bokeh field, a mirrored spectral ribbon, layered waveform echoes, restrained typography, bloom, vignette, and grain. Loudness controls exposure and breathing, bass expands the bokeh, mids move the atmosphere, treble sharpens detail, and spectral flux drives brief onset accents.
+The initial preset is **Rainbow Signal Dream**: a slow prismatic noise-and-bokeh field, a rainbow spectral ribbon, layered waveform echoes, onset blooms, vignette, and grain. Loudness controls exposure and breathing, bass expands the bokeh, mids move the atmosphere, treble sharpens detail, and spectral flux drives brief color accents. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
+
+Text and signal graphics use an aspect-aware safe composition. Landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
+
+Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceeds the requested 320 kbps quality while remaining more compatible with MP4 upload pipelines than an MP3 stream.
+
+## Showcase
+
+[![Rainbow Signal Dream generated from the loop fixture](./docs/showcase-loop.png)](./loop.mp4)
+
+[Watch the generated MP4](./loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
+
+Regenerate the showcase locally with `bun run test:loop`.
 
 ## Quick start
 
@@ -21,6 +33,8 @@ bun run render -- ./song.mp3 \
   --output ./renders/night-signal.mp4
 ```
 
+Every MP4 includes stereo AAC-LC audio at 48 kHz and a 384 kbps target bitrate. This exceeds the requested 320 kbps compressed-audio quality while retaining broad upload compatibility.
+
 The default is `1920×1280` at 30 fps. This deliberately interprets “Full HD + 3:2” as a Full-HD-width, 3:2 frame. Standard Full HD is 16:9, so use either of these when that is the intended format:
 
 ```sh
@@ -35,6 +49,12 @@ bun run preview -- ./song.mp3 --overwrite
 ```
 
 The preview script renders at `960×640` with a faster encode preset. Set `--start 45` to inspect a later section.
+
+For the committed six-second loop fixture, one command writes `loop.mp4` in the project root:
+
+```sh
+bun run test:loop
+```
 
 ## Deterministic two-stage processing
 
@@ -70,8 +90,9 @@ bun run render -- ./song.wav --config ./visu.config.json
     "width": 1920,
     "height": 1280,
     "fps": 30,
+    "renderScale": 0.5,
     "crf": 18,
-    "preset": "medium"
+    "preset": "veryfast"
   },
   "text": {
     "title": "",
@@ -104,6 +125,30 @@ Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `--duration` is quantized upward to complete video frames. For example, `0.51` seconds at 12 fps becomes 7 frames and is reported as `0.58` seconds, matching the encoded stream.
 
+`renderScale` controls the internal Canvas resolution independently of the encoded resolution. The `0.5` default renders one quarter as many pixels and lets FFmpeg upscale with Lanczos filtering, which fits the soft background aesthetic and substantially reduces render time. Use `--render-scale 1` for native-resolution line and text rendering, or `--render-scale 0.25` for very fast drafts.
+
+## Platform-safe composition
+
+Fog and bokeh remain full bleed, but title, artist, waveform, spectrum, and analysis bars stay inside conservative player-safe rectangles:
+
+| Output shape | Content bounds | Graph bounds |
+| --- | --- | --- |
+| Landscape | `x 8–92%`, `y 16–80%` | `y 40–72%` |
+| Square | `x 8–80%`, `y 16–62%` | `y 38–60%` |
+| Portrait | `x 12–76%`, `y 16–62%` | `y 38–60%` |
+
+Vertical and square outputs reserve extra room for captions, progress controls, and right-side reaction/action buttons. Long title and artist strings are measured, centered, scaled to the safe width, and clipped to the upper text region as a final guard.
+
+Useful platform renders:
+
+```sh
+# TikTok / Instagram Reels / YouTube Shorts
+bun run render -- ./song.wav --resolution fullhd --ratio 9:16
+
+# YouTube / Vimeo landscape
+bun run render -- ./song.wav --resolution fullhd --ratio 16:9
+```
+
 Run `bun src/cli.ts --help` for every option.
 
 ## Pipeline
@@ -128,10 +173,10 @@ bun test
 bun run check
 ```
 
-Tests cover the FFT, normalized analysis, strict cache validation, configuration, seeded randomness, repeatable RGBA rendering, and an FFmpeg/ffprobe A/V integration render. A practical smoke test is a short preview followed by:
+Tests cover the FFT, normalized analysis, strict cache validation, aspect-aware safe zones, configuration, seeded randomness, repeatable RGBA rendering, and an FFmpeg/ffprobe A/V integration render. A practical smoke test is a short preview followed by:
 
 ```sh
 ffprobe -v error -show_streams -show_format ./renders/example.mp4
 ```
 
-Full-resolution rendering is intentionally offline and CPU-heavy. Start with the preview preset while tuning a seed, title, and composition, then run the final encode.
+Start with `bun run test:loop` or the preview preset while tuning a seed, title, and composition. Use `--render-scale 1` only when the extra native-resolution sharpness is worth the additional render time.

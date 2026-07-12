@@ -11,6 +11,7 @@
     "analyze": "bun src/cli.ts analyze",
     "render": "bun src/cli.ts render",
     "preview": "bun src/cli.ts render --duration 8 --size 960x640 --quality preview",
+    "test:loop": "bun src/cli.ts render test-e2e/loop.wav --output loop.mp4 --size 640x360 --fps 24 --quality preview --seed loop-smoke --overwrite",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"

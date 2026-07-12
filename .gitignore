@@ -2,6 +2,7 @@ node_modules/
 dist/
 renders/
 *.mp4
+!loop.mp4
 *.webm
 *.mov
 *.analysis.json

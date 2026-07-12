@@ -1,5 +1,6 @@
 import { sha256 } from "../math/random.js";
 import { hashFile } from "../audio/decode.js";
+import { renderDimensions } from "../config.js";
 import {
   ANALYSIS_VERSION,
   RENDERER_VERSION,
@@ -19,6 +20,8 @@ export interface RenderResult {
   duration: number;
   frames: number;
   seed: string;
+  renderWidth: number;
+  renderHeight: number;
 }
 
 export async function renderVideo(
@@ -61,7 +64,8 @@ export async function renderVideo(
     ].join(":"),
   ).slice(0, 16);
   const seed = request.config.visual.seed === "auto" ? automaticSeed : request.config.visual.seed;
-  const renderer = new VisualizerRenderer(request.config, seed);
+  const renderSize = renderDimensions(request.config);
+  const renderer = new VisualizerRenderer(request.config, seed, renderSize);
   const encoder = await FfmpegEncoder.create({
     audioPath: request.audioPath,
     outputPath: request.outputPath,
@@ -69,6 +73,8 @@ export async function renderVideo(
     start: request.start,
     duration,
     frameCount: totalFrames,
+    inputWidth: renderSize.width,
+    inputHeight: renderSize.height,
     overwrite: request.overwrite,
   });
   const startedAt = performance.now();
@@ -90,5 +96,11 @@ export async function renderVideo(
     throw error;
   }
 
-  return { duration, frames: totalFrames, seed };
+  return {
+    duration,
+    frames: totalFrames,
+    seed,
+    renderWidth: renderSize.width,
+    renderHeight: renderSize.height,
+  };
 }

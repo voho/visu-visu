@@ -13,6 +13,8 @@ describe("project configuration", () => {
     expect(config.output.width).toBe(1920);
     expect(config.output.height).toBe(1280);
     expect(config.output.width / config.output.height).toBe(1.5);
+    expect(config.output.renderScale).toBe(0.5);
+    expect(config.output.preset).toBe("veryfast");
     expect(config).toEqual(DEFAULT_CONFIG);
   });
 
@@ -34,6 +36,13 @@ describe("project configuration", () => {
 
   test("requires even dimensions", () => {
     expect(() => parseSize("1921x1080")).toThrow("must be even");
+  });
+
+  test("validates the internal render scale", () => {
+    expect(() => parseProjectConfig({ output: { renderScale: 0.1 } })).toThrow(
+      "output.renderScale must be between 0.25 and 1",
+    );
+    expect(parseProjectConfig({ output: { renderScale: 1 } }).output.renderScale).toBe(1);
   });
 
   test("combines an independent resolution and aspect ratio", () => {

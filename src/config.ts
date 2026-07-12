@@ -8,8 +8,9 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     width: 1920,
     height: 1280,
     fps: 30,
+    renderScale: 0.5,
     crf: 18,
-    preset: "medium",
+    preset: "veryfast",
   },
   text: {
     title: "",
@@ -114,6 +115,13 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       width,
       height,
       fps: integer(output.fps, DEFAULT_CONFIG.output.fps, "output.fps", 12, 60),
+      renderScale: boundedNumber(
+        output.renderScale,
+        DEFAULT_CONFIG.output.renderScale,
+        "output.renderScale",
+        0.25,
+        1,
+      ),
       crf: integer(output.crf, DEFAULT_CONFIG.output.crf, "output.crf", 0, 51),
       preset: preset as ProjectConfig["output"]["preset"],
     },
@@ -213,4 +221,13 @@ export function dimensionsFor(
   const even = (value: number): number => Math.max(160, Math.round(value / 2) * 2);
   if (ratio >= 1) return { width: longEdge, height: even(longEdge / ratio) };
   return { width: even(longEdge * ratio), height: longEdge };
+}
+
+export function renderDimensions(config: ProjectConfig): { width: number; height: number } {
+  const scaled = (value: number): number =>
+    Math.max(32, Math.round((value * config.output.renderScale) / 2) * 2);
+  return {
+    width: scaled(config.output.width),
+    height: scaled(config.output.height),
+  };
 }

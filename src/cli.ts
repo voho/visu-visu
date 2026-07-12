@@ -11,6 +11,7 @@ import {
   parseProjectConfig,
   parseRatio,
   parseSize,
+  renderDimensions,
 } from "./config.js";
 import { renderVideo } from "./render/render.js";
 import type { ProjectConfig } from "./types.js";
@@ -31,6 +32,7 @@ Render options:
       --ratio <W:H>         Aspect ratio shorthand, for example 16:9 or 3:2
       --resolution <name>   Long-edge preset: hd, fullhd, or 4k
       --fps <number>        Override frame rate (12–60, default: 30)
+      --render-scale <n>    Internal resolution scale (0.25–1, default: 0.5)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
@@ -84,6 +86,7 @@ function overrideConfig(
     ratio?: string;
     resolution?: string;
     fps?: string;
+    renderScale?: string;
     seed?: string;
     title?: string;
     artist?: string;
@@ -113,6 +116,7 @@ function overrideConfig(
   }
   const fps = numericOption(options.fps, "fps");
   if (fps !== undefined) mutable.output.fps = fps;
+  const renderScale = numericOption(options.renderScale, "render-scale");
   const bands = numericOption(options.bands, "bands");
   if (bands !== undefined) mutable.visual.spectrumBands = bands;
   if (options.seed !== undefined) mutable.visual.seed = options.seed;
@@ -120,12 +124,14 @@ function overrideConfig(
   if (options.artist !== undefined) mutable.text.artist = options.artist;
   if (options.quality !== undefined) {
     if (options.quality === "preview") {
-      mutable.output.crf = 24;
-      mutable.output.preset = "veryfast";
+      mutable.output.crf = 26;
+      mutable.output.preset = "ultrafast";
+      if (renderScale === undefined) mutable.output.renderScale = 0.5;
     } else if (options.quality !== "final") {
       throw new Error('--quality must be either "preview" or "final"');
     }
   }
+  if (renderScale !== undefined) mutable.output.renderScale = renderScale;
   return parseProjectConfig(mutable);
 }
 
@@ -171,6 +177,7 @@ async function runRender(args: string[]): Promise<void> {
       size: { type: "string" },
       ratio: { type: "string" },
       resolution: { type: "string" },
+      "render-scale": { type: "string" },
       seed: { type: "string" },
       title: { type: "string" },
       artist: { type: "string" },
@@ -190,6 +197,9 @@ async function runRender(args: string[]): Promise<void> {
     ...(values.ratio === undefined ? {} : { ratio: values.ratio }),
     ...(values.resolution === undefined ? {} : { resolution: values.resolution }),
     ...(values.fps === undefined ? {} : { fps: values.fps }),
+    ...(values["render-scale"] === undefined
+      ? {}
+      : { renderScale: values["render-scale"] }),
     ...(values.seed === undefined ? {} : { seed: values.seed }),
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
@@ -220,8 +230,13 @@ async function runRender(args: string[]): Promise<void> {
     }
   }
 
+  const internalSize = renderDimensions(config);
+  const scaling =
+    internalSize.width === config.output.width && internalSize.height === config.output.height
+      ? "native"
+      : `${internalSize.width}x${internalSize.height} internal`;
   console.log(
-    `Render   ${config.output.width}x${config.output.height} · ${config.output.fps} fps · grayscale drift`,
+    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · rainbow drift`,
   );
   let lastPercent = -1;
   const result = await renderVideo(
@@ -239,7 +254,7 @@ async function runRender(args: string[]): Promise<void> {
       if (percent === 100 || percent >= lastPercent + 5) {
         lastPercent = percent;
         const rate = elapsedSeconds > 0 ? frame / elapsedSeconds : 0;
-        process.stdout.write(`\rEncode   ${String(percent).padStart(3)}% · ${rate.toFixed(1)} frames/s`);
+        process.stdout.write(`\rFrames   ${String(percent).padStart(3)}% · ${rate.toFixed(1)} frames/s`);
       }
     },
   );

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { analyzeAudio } from "../src/audio/analyze.js";
 import { decodeAudio } from "../src/audio/decode.js";
 import { parseProjectConfig } from "../src/config.js";
+import { DELIVERY_AUDIO_BITRATE } from "../src/render/encoder.js";
 import { renderVideo } from "../src/render/render.js";
 import type { AudioAnalysis } from "../src/types.js";
 
@@ -60,6 +61,8 @@ describe("video render integration", () => {
     );
     expect(result.frames).toBe(7);
     expect(result.duration).toBeCloseTo(7 / 12, 8);
+    expect(result.renderWidth).toBe(80);
+    expect(result.renderHeight).toBe(80);
 
     const probe = spawnSync(
       "ffprobe",
@@ -67,10 +70,8 @@ describe("video render integration", () => {
         "-v",
         "error",
         "-count_frames",
-        "-select_streams",
-        "v:0",
         "-show_entries",
-        "stream=nb_read_frames,duration,width,height,r_frame_rate",
+        "stream=codec_name,codec_type,profile,nb_read_frames,duration,width,height,r_frame_rate,bit_rate,sample_rate,channels",
         "-of",
         "json",
         outputPath,
@@ -80,18 +81,31 @@ describe("video render integration", () => {
     if (probe.status !== 0) throw new Error(`Could not probe rendered fixture: ${probe.stderr}`);
     const parsed = JSON.parse(probe.stdout) as {
       streams?: Array<{
+        codec_name?: string;
+        codec_type?: string;
+        profile?: string;
         nb_read_frames?: string;
         duration?: string;
         width?: number;
         height?: number;
         r_frame_rate?: string;
+        bit_rate?: string;
+        sample_rate?: string;
+        channels?: number;
       }>;
     };
-    const stream = parsed.streams?.[0];
-    expect(stream?.nb_read_frames).toBe("7");
-    expect(Number(stream?.duration)).toBeCloseTo(7 / 12, 5);
-    expect(stream?.width).toBe(160);
-    expect(stream?.height).toBe(160);
-    expect(stream?.r_frame_rate).toBe("12/1");
+    const video = parsed.streams?.find((stream) => stream.codec_type === "video");
+    const audio = parsed.streams?.find((stream) => stream.codec_type === "audio");
+    expect(video?.nb_read_frames).toBe("7");
+    expect(Number(video?.duration)).toBeCloseTo(7 / 12, 5);
+    expect(video?.width).toBe(160);
+    expect(video?.height).toBe(160);
+    expect(video?.r_frame_rate).toBe("12/1");
+    expect(audio?.codec_name).toBe("aac");
+    expect(audio?.profile).toBe("LC");
+    expect(audio?.sample_rate).toBe("48000");
+    expect(audio?.channels).toBe(2);
+    expect(DELIVERY_AUDIO_BITRATE).toBeGreaterThanOrEqual(320_000);
+    expect(Number(audio?.bit_rate)).toBeGreaterThan(0);
   });
 });

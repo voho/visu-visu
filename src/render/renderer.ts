@@ -9,6 +9,7 @@ import {
   smoothstep,
 } from "../math/random.js";
 import type { AnalysisFrame, AudioAnalysis, ProjectConfig } from "../types.js";
+import { createSafeLayout, type SafeLayout } from "./layout.js";
 
 interface BokehParticle {
   x: number;
@@ -20,6 +21,7 @@ interface BokehParticle {
   sway: number;
   depth: number;
   spectrumIndex: number;
+  hue: number;
 }
 
 interface FogField {
@@ -29,6 +31,7 @@ interface FogField {
   phase: number;
   speed: number;
   opacity: number;
+  hue: number;
 }
 
 function rgba(level: number, alpha = 1): string {
@@ -36,22 +39,13 @@ function rgba(level: number, alpha = 1): string {
   return `rgba(${channel}, ${channel}, ${channel}, ${clamp(alpha)})`;
 }
 
-function wrap(value: number): number {
-  return ((value % 1) + 1) % 1;
+function hsla(hue: number, saturation: number, lightness: number, alpha = 1): string {
+  const normalizedHue = ((hue % 360) + 360) % 360;
+  return `hsla(${normalizedHue}, ${clamp(saturation, 0, 100)}%, ${clamp(lightness, 0, 100)}%, ${clamp(alpha)})`;
 }
 
-function drawSpacedText(
-  context: SKRSContext2D,
-  text: string,
-  x: number,
-  y: number,
-  spacing: number,
-): void {
-  let cursor = x;
-  for (const character of text) {
-    context.fillText(character, cursor, y);
-    cursor += context.measureText(character).width + spacing;
-  }
+function wrap(value: number): number {
+  return ((value % 1) + 1) % 1;
 }
 
 export class VisualizerRenderer {
@@ -68,14 +62,25 @@ export class VisualizerRenderer {
   private readonly backgroundHeight: number;
   private readonly config: ProjectConfig;
   private readonly seed: string;
+  private readonly palettePhase: number;
+  private readonly layout: SafeLayout;
 
-  constructor(config: ProjectConfig, seed: string) {
+  constructor(
+    config: ProjectConfig,
+    seed: string,
+    renderSize: { width: number; height: number } = {
+      width: config.output.width,
+      height: config.output.height,
+    },
+  ) {
     this.config = config;
     this.seed = seed;
-    this.width = config.output.width;
-    this.height = config.output.height;
-    this.backgroundWidth = Math.max(160, Math.round(this.width / 4));
-    this.backgroundHeight = Math.max(100, Math.round(this.height / 4));
+    this.width = renderSize.width;
+    this.height = renderSize.height;
+    this.backgroundWidth = Math.max(64, Math.round(this.width / 4));
+    this.backgroundHeight = Math.max(40, Math.round(this.height / 4));
+    this.palettePhase = createRandom(deriveSeed(this.seed, "palette"))() * 360;
+    this.layout = createSafeLayout(this.width, this.height);
     this.canvas = createCanvas(this.width, this.height);
     this.context = this.canvas.getContext("2d");
     this.backgroundCanvas = createCanvas(this.backgroundWidth, this.backgroundHeight);
@@ -97,6 +102,7 @@ export class VisualizerRenderer {
       sway: randomBetween(random, 0.008, 0.05),
       depth: randomBetween(random, 0.35, 1),
       spectrumIndex: index % this.config.visual.spectrumBands,
+      hue: randomBetween(random, 0, 360),
     }));
   }
 
@@ -109,6 +115,7 @@ export class VisualizerRenderer {
       phase: randomBetween(random, 0, Math.PI * 2),
       speed: randomBetween(random, 0.006, 0.022),
       opacity: randomBetween(random, 0.04, 0.13),
+      hue: randomBetween(random, 0, 360),
     }));
   }
 
@@ -148,15 +155,35 @@ export class VisualizerRenderer {
     this.drawBackground(current, time);
     this.drawAtmosphere(current, time);
     this.drawSpectrum(current, time);
-    this.drawWaveform(previousB, 0.07, 2.5);
-    this.drawWaveform(previousA, 0.13, 1.8);
-    this.drawWaveform(current, 0.62 + current.onset * 0.22, 1);
-    this.drawTypography(analysis, time, current);
-    this.drawPostEffects(current, Math.round(time * this.config.output.fps));
+    this.drawWaveform(previousB, time, -40, 0.08, 2.5);
+    this.drawWaveform(previousA, time, -18, 0.16, 1.8);
+    this.drawWaveform(current, time, 0, 0.68 + current.onset * 0.22, 1);
+    this.drawPostEffects(current, Math.round(time * this.config.output.fps), time);
+    this.drawTypography(analysis, time);
     context.restore();
 
     const image = context.getImageData(0, 0, this.width, this.height);
     return Buffer.from(image.data.buffer, image.data.byteOffset, image.data.byteLength);
+  }
+
+  private rainbowGradient(
+    context: SKRSContext2D,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    time: number,
+    alpha: number,
+    hueShift = 0,
+    lightness = 64,
+  ) {
+    const gradient = context.createLinearGradient(x0, y0, x1, y1);
+    for (let stop = 0; stop <= 8; stop += 1) {
+      const progress = stop / 8;
+      const hue = this.palettePhase + time * 5 + hueShift + progress * 360;
+      gradient.addColorStop(progress, hsla(hue, 96, lightness, alpha));
+    }
+    return gradient;
   }
 
   private drawBackground(frame: AnalysisFrame, time: number): void {
@@ -164,11 +191,11 @@ export class VisualizerRenderer {
     const width = this.backgroundWidth;
     const height = this.backgroundHeight;
     const intensity = this.config.visual.intensity;
-    const baseLevel = 5 + frame.rms * 7 * intensity;
+    const baseHue = this.palettePhase + time * 1.8;
     const gradient = context.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, rgba(baseLevel + frame.mid * 8));
-    gradient.addColorStop(0.45, rgba(baseLevel));
-    gradient.addColorStop(1, rgba(baseLevel + frame.bass * 10));
+    gradient.addColorStop(0, hsla(baseHue + 210, 78, 3 + frame.mid * 5 * intensity));
+    gradient.addColorStop(0.45, hsla(baseHue + 285, 72, 2.5 + frame.rms * 4 * intensity));
+    gradient.addColorStop(1, hsla(baseHue + 350, 82, 4 + frame.bass * 7 * intensity));
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
 
@@ -179,9 +206,13 @@ export class VisualizerRenderer {
       const y = (field.y + Math.cos(angle) * 0.09) * height;
       const radius = field.radius * Math.max(width, height) * (1 + frame.bass * 0.18);
       const fog = context.createRadialGradient(x, y, 0, x, y, radius);
-      const level = 85 + frame.mid * 95 + frame.rms * 35;
-      fog.addColorStop(0, rgba(level, field.opacity * intensity));
-      fog.addColorStop(0.42, rgba(level * 0.62, field.opacity * 0.42 * intensity));
+      const hue = baseHue + field.hue + frame.centroid * 120;
+      const lightness = 48 + frame.mid * 22 + frame.rms * 8;
+      fog.addColorStop(0, hsla(hue, 88, lightness, field.opacity * 1.45 * intensity));
+      fog.addColorStop(
+        0.42,
+        hsla(hue + 38, 92, lightness * 0.68, field.opacity * 0.54 * intensity),
+      );
       fog.addColorStop(1, "rgba(0, 0, 0, 0)");
       context.fillStyle = fog;
       context.fillRect(0, 0, width, height);
@@ -198,11 +229,14 @@ export class VisualizerRenderer {
         (0.82 + frame.bass * 0.42 + spectrum * 0.18) *
         particle.depth;
       const bokeh = context.createRadialGradient(x, y, radius * 0.08, x, y, radius);
-      const level = 115 + spectrum * 95 + frame.rms * 35;
       const opacity = particle.opacity * (0.62 + frame.rms * 0.5) * intensity;
-      bokeh.addColorStop(0, rgba(level, opacity));
-      bokeh.addColorStop(0.2, rgba(level, opacity * 0.72));
-      bokeh.addColorStop(0.72, rgba(level * 0.5, opacity * 0.14));
+      const frequencyHue =
+        (particle.spectrumIndex / Math.max(1, this.config.visual.spectrumBands - 1)) * 300;
+      const hue = baseHue + particle.hue + frequencyHue;
+      const lightness = 58 + spectrum * 18 + frame.rms * 7;
+      bokeh.addColorStop(0, hsla(hue, 98, lightness, opacity * 1.4));
+      bokeh.addColorStop(0.2, hsla(hue + 24, 96, lightness * 0.88, opacity));
+      bokeh.addColorStop(0.72, hsla(hue + 55, 92, lightness * 0.56, opacity * 0.2));
       bokeh.addColorStop(1, "rgba(0, 0, 0, 0)");
       context.fillStyle = bokeh;
       context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
@@ -216,7 +250,6 @@ export class VisualizerRenderer {
     output.translate(this.width / 2, this.height / 2);
     output.rotate(rotation);
     output.scale(breathing, breathing);
-    output.filter = `blur(${Math.max(8, Math.round(this.width * 0.008))}px)`;
     output.imageSmoothingEnabled = true;
     output.imageSmoothingQuality = "high";
     output.drawImage(
@@ -227,35 +260,43 @@ export class VisualizerRenderer {
       this.height * 1.06,
     );
     output.restore();
-    output.filter = "none";
   }
 
   private drawAtmosphere(frame: AnalysisFrame, time: number): void {
     const context = this.context;
-    const glowX = this.width * (0.52 + Math.sin(time * 0.031) * 0.09);
-    const glowY = this.height * (0.57 + Math.cos(time * 0.024) * 0.06);
+    const glowX = this.layout.centerX + Math.sin(time * 0.031) * this.layout.width * 0.09;
+    const glowY = this.layout.horizon + Math.cos(time * 0.024) * this.layout.height * 0.05;
     const radius = Math.max(this.width, this.height) * (0.2 + frame.bass * 0.04);
     const glow = context.createRadialGradient(glowX, glowY, 0, glowX, glowY, radius);
-    glow.addColorStop(0, rgba(180, 0.035 + frame.rms * 0.05));
+    const glowHue = this.palettePhase + time * 3 + frame.centroid * 220;
+    glow.addColorStop(0, hsla(glowHue, 96, 64, 0.07 + frame.rms * 0.09));
+    glow.addColorStop(0.42, hsla(glowHue + 60, 94, 42, 0.025 + frame.mid * 0.03));
     glow.addColorStop(1, "rgba(0, 0, 0, 0)");
     context.fillStyle = glow;
     context.fillRect(0, 0, this.width, this.height);
 
-    const horizon = this.height * 0.61;
-    const line = context.createLinearGradient(this.width * 0.08, 0, this.width * 0.92, 0);
-    line.addColorStop(0, "rgba(255,255,255,0)");
-    line.addColorStop(0.5, rgba(220, 0.08 + frame.rms * 0.08));
-    line.addColorStop(1, "rgba(255,255,255,0)");
+    const horizon = this.layout.horizon;
+    const line = this.rainbowGradient(
+      context,
+      this.layout.left,
+      0,
+      this.layout.right,
+      0,
+      time,
+      0.09 + frame.rms * 0.09,
+      -30,
+      70,
+    );
     context.fillStyle = line;
-    context.fillRect(this.width * 0.08, horizon - 1, this.width * 0.84, 2);
+    context.fillRect(this.layout.left, horizon - 1, this.layout.width, 2);
   }
 
   private drawSpectrum(frame: AnalysisFrame, time: number): void {
     const context = this.context;
-    const margin = this.width * 0.08;
-    const usableWidth = this.width - margin * 2;
-    const horizon = this.height * 0.61;
-    const maxHeight = this.height * (0.105 + frame.rms * 0.035);
+    const margin = this.layout.left;
+    const usableWidth = this.layout.width;
+    const horizon = this.layout.horizon;
+    const maxHeight = horizon - this.layout.graphTop;
     const bands = frame.spectrum.length;
     const pulse = this.config.visual.lowFlash ? Math.min(frame.onset, 0.32) : frame.onset;
 
@@ -270,7 +311,9 @@ export class VisualizerRenderer {
       const energy = frame.spectrum[spectrumIndex] ?? 0;
       const ripple = Math.sin(time * 0.8 + progress * Math.PI * 10) * frame.treble * 0.04;
       const x = margin + usableWidth * progress;
-      const y = horizon - (energy + ripple) * maxHeight * (0.72 + frame.rms * 0.45);
+      const y =
+        horizon -
+        clamp(energy + ripple) * maxHeight * (0.72 + frame.rms * 0.28);
       context.lineTo(x, y);
     }
     for (let point = bands * 2; point >= 0; point -= 1) {
@@ -283,13 +326,30 @@ export class VisualizerRenderer {
       context.lineTo(x, y);
     }
     context.closePath();
-    const fill = context.createLinearGradient(0, horizon - maxHeight, 0, horizon + maxHeight);
-    fill.addColorStop(0, rgba(230, 0.1 + pulse * 0.12));
-    fill.addColorStop(0.5, rgba(160, 0.015));
-    fill.addColorStop(1, rgba(210, 0.05 + pulse * 0.05));
+    const fill = this.rainbowGradient(
+      context,
+      margin,
+      horizon,
+      margin + usableWidth,
+      horizon,
+      time,
+      0.13 + pulse * 0.16,
+      0,
+      62,
+    );
     context.fillStyle = fill;
     context.fill();
-    context.strokeStyle = rgba(230, 0.2 + frame.rms * 0.18 + pulse * 0.15);
+    context.strokeStyle = this.rainbowGradient(
+      context,
+      margin,
+      horizon,
+      margin + usableWidth,
+      horizon,
+      time,
+      0.32 + frame.rms * 0.24 + pulse * 0.18,
+      18,
+      70,
+    );
     context.lineWidth = Math.max(1, this.width / 1200);
     context.stroke();
 
@@ -298,22 +358,30 @@ export class VisualizerRenderer {
     for (let index = 0; index < bands; index += 1) {
       const energy = frame.spectrum[index] ?? 0;
       const x = margin + (index + 0.5) * barWidth;
-      const height = energy * this.height * 0.07;
-      context.strokeStyle = rgba(220, 0.04 + energy * 0.12);
+      const height = energy * (this.layout.graphBottom - horizon) * 0.58;
+      const hue = this.palettePhase + time * 5 + (index / Math.max(1, bands - 1)) * 320;
+      context.strokeStyle = hsla(hue, 96, 68, 0.08 + energy * 0.22);
       context.beginPath();
-      context.moveTo(x, horizon + this.height * 0.17);
-      context.lineTo(x, horizon + this.height * 0.17 - height);
+      context.moveTo(x, this.layout.graphBottom);
+      context.lineTo(x, this.layout.graphBottom - height);
       context.stroke();
     }
     context.restore();
   }
 
-  private drawWaveform(frame: AnalysisFrame, alpha: number, widthScale: number): void {
+  private drawWaveform(
+    frame: AnalysisFrame,
+    time: number,
+    hueShift: number,
+    alpha: number,
+    widthScale: number,
+  ): void {
     const context = this.context;
-    const margin = this.width * 0.08;
-    const usableWidth = this.width - margin * 2;
-    const horizon = this.height * 0.61;
-    const amplitude = this.height * (0.055 + frame.rms * 0.045);
+    const margin = this.layout.left;
+    const usableWidth = this.layout.width;
+    const horizon = this.layout.horizon;
+    const amplitude =
+      (horizon - this.layout.graphTop) * (0.46 + frame.rms * 0.38);
     const onset = this.config.visual.lowFlash ? Math.min(frame.onset, 0.32) : frame.onset;
 
     context.save();
@@ -327,21 +395,35 @@ export class VisualizerRenderer {
       if (index === 0) context.moveTo(x, y);
       else context.lineTo(x, y);
     }
-    context.strokeStyle = rgba(242, clamp(alpha + onset * 0.22));
+    context.strokeStyle = this.rainbowGradient(
+      context,
+      margin,
+      horizon,
+      margin + usableWidth,
+      horizon,
+      time,
+      clamp(alpha + onset * 0.24),
+      hueShift,
+      72,
+    );
     context.lineWidth = Math.max(0.8, (this.width / 960) * widthScale);
-    context.shadowColor = rgba(255, alpha * 0.8);
+    context.shadowColor = hsla(
+      this.palettePhase + time * 5 + 180 + hueShift,
+      100,
+      72,
+      alpha * 0.85,
+    );
     context.shadowBlur = this.width * 0.006 * alpha;
     context.stroke();
     context.restore();
   }
 
-  private drawTypography(analysis: AudioAnalysis, time: number, frame: AnalysisFrame): void {
-    const title = this.config.text.title;
-    const artist = this.config.text.artist;
+  private drawTypography(analysis: AudioAnalysis, time: number): void {
+    const title = this.config.text.title.normalize("NFC").replace(/\s+/g, " ").trim();
+    const artist = this.config.text.artist.normalize("NFC").replace(/\s+/g, " ").trim();
     if (!title && !artist) return;
     const context = this.context;
-    const safeX = this.width * 0.065;
-    const safeY = this.height * 0.095;
+    const safeY = this.layout.titleY;
     const endReveal = smoothstep(analysis.duration - 7, analysis.duration - 3.5, time);
     const entrance = smoothstep(0.15, 1.8, time);
     const settle = 1 - smoothstep(5.5, 9, time) * 0.72;
@@ -349,45 +431,125 @@ export class VisualizerRenderer {
     const blur = lerp(this.width * 0.008, 0, smoothstep(0.2, 1.4, time));
 
     context.save();
+    context.beginPath();
+    context.rect(
+      this.layout.left,
+      this.layout.top,
+      this.layout.width,
+      this.layout.graphTop - this.layout.top,
+    );
+    context.clip();
+    const scrim = context.createRadialGradient(
+      this.layout.centerX,
+      safeY,
+      0,
+      this.layout.centerX,
+      safeY,
+      Math.max(this.layout.width * 0.58, this.layout.height * 0.34),
+    );
+    scrim.addColorStop(0, "rgba(0,0,0,0.52)");
+    scrim.addColorStop(1, "rgba(0,0,0,0)");
+    context.fillStyle = scrim;
+    context.fillRect(
+      this.layout.left,
+      this.layout.top,
+      this.layout.width,
+      this.layout.graphTop - this.layout.top,
+    );
     context.globalAlpha = alpha;
     context.filter = blur > 0.2 ? `blur(${blur}px)` : "none";
     context.shadowColor = "rgba(0,0,0,0.7)";
     context.shadowBlur = this.width * 0.012;
     context.fillStyle = rgba(245, 0.94);
-    context.font = `600 ${Math.round(this.width * 0.038)}px sans-serif`;
     context.textBaseline = "top";
-    drawSpacedText(context, title.toUpperCase(), safeX, safeY, this.width * 0.004);
+    const textBoxHeight = this.layout.graphTop - safeY;
+    const baseTitleSize = Math.min(
+      this.width * 0.038,
+      this.height * 0.07,
+      textBoxHeight / (title && artist ? 2.05 : 1.15),
+    );
+    const titleSize = this.drawFittedText(
+      context,
+      title.toUpperCase(),
+      "600",
+      "sans-serif",
+      baseTitleSize,
+      baseTitleSize * 0.105,
+      safeY,
+    );
 
     if (artist) {
       context.filter = "none";
       context.fillStyle = rgba(218, 0.66);
-      context.font = `400 ${Math.round(this.width * 0.012)}px monospace`;
-      drawSpacedText(context, artist.toUpperCase(), safeX + this.width * 0.002, safeY + this.width * 0.062, this.width * 0.0022);
+      const artistY = title ? safeY + titleSize * 1.58 : safeY;
+      this.drawFittedText(
+        context,
+        artist.toUpperCase(),
+        "400",
+        "monospace",
+        baseTitleSize * 0.34,
+        baseTitleSize * 0.061,
+        artistY,
+      );
     }
-    context.restore();
-
-    context.save();
-    context.globalAlpha = 0.18 + frame.rms * 0.13;
-    context.fillStyle = rgba(225, 1);
-    context.font = `400 ${Math.round(this.width * 0.0075)}px monospace`;
-    context.textBaseline = "bottom";
-    drawSpacedText(
-      context,
-      `${this.seed.slice(0, 8).toUpperCase()}  /  ${Math.floor(time / 60)
-        .toString()
-        .padStart(2, "0")}:${Math.floor(time % 60).toString().padStart(2, "0")}`,
-      safeX,
-      this.height * 0.925,
-      this.width * 0.0008,
-    );
     context.restore();
   }
 
-  private drawPostEffects(frame: AnalysisFrame, frameIndex: number): void {
+  private drawFittedText(
+    context: SKRSContext2D,
+    text: string,
+    weight: string,
+    family: string,
+    baseSize: number,
+    baseSpacing: number,
+    y: number,
+  ): number {
+    if (!text) return 0;
+    let size = Math.max(0.1, baseSize);
+    let spacing = baseSpacing;
+    context.font = `${weight} ${size}px ${family}`;
+    context.letterSpacing = `${spacing}px`;
+    const initialWidth = context.measureText(text).width;
+    const scale = Math.min(1, (this.layout.width * 0.92) / Math.max(1, initialWidth));
+    size = Math.max(0.1, size * scale);
+    spacing *= scale;
+    context.font = `${weight} ${size}px ${family}`;
+    context.letterSpacing = `${spacing}px`;
+    context.textAlign = "center";
+    context.fillText(text, this.layout.centerX, y);
+    return size;
+  }
+
+  private drawPostEffects(frame: AnalysisFrame, frameIndex: number, time: number): void {
     const context = this.context;
     const flash = this.config.visual.lowFlash ? Math.min(frame.onset, 0.28) : frame.onset;
     if (flash > 0.01) {
-      context.fillStyle = rgba(255, flash * 0.065 * this.config.visual.intensity);
+      let dominantBand = 0;
+      for (let index = 1; index < frame.spectrum.length; index += 1) {
+        if ((frame.spectrum[index] ?? 0) > (frame.spectrum[dominantBand] ?? 0)) dominantBand = index;
+      }
+      const hue =
+        this.palettePhase +
+        time * 5 +
+        (dominantBand / Math.max(1, frame.spectrum.length - 1)) * 320;
+      const bloom = context.createRadialGradient(
+        this.layout.centerX,
+        this.layout.horizon,
+        0,
+        this.layout.centerX,
+        this.layout.horizon,
+        Math.max(this.width, this.height) * 0.55,
+      );
+      bloom.addColorStop(
+        0,
+        hsla(hue, 100, 72, flash * 0.18 * this.config.visual.intensity),
+      );
+      bloom.addColorStop(
+        0.38,
+        hsla(hue + 50, 98, 58, flash * 0.07 * this.config.visual.intensity),
+      );
+      bloom.addColorStop(1, "rgba(0,0,0,0)");
+      context.fillStyle = bloom;
       context.fillRect(0, 0, this.width, this.height);
     }
 
