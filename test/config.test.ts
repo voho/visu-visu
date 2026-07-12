@@ -16,6 +16,7 @@ describe("project configuration", () => {
     expect(config.output.renderScale).toBe(1);
     expect(config.output.crf).toBe(8);
     expect(config.output.preset).toBe("slow");
+    expect(config.output.fadeSeconds).toBe(3);
     expect(config.visual.grain).toBe(0.018);
     expect(config).toEqual(DEFAULT_CONFIG);
   });
@@ -45,6 +46,13 @@ describe("project configuration", () => {
       "output.renderScale must be between 0.25 and 1",
     );
     expect(parseProjectConfig({ output: { renderScale: 1 } }).output.renderScale).toBe(1);
+  });
+
+  test("validates the synchronized fade duration", () => {
+    expect(() => parseProjectConfig({ output: { fadeSeconds: -0.1 } })).toThrow(
+      "output.fadeSeconds must be between 0 and 30",
+    );
+    expect(parseProjectConfig({ output: { fadeSeconds: 0 } }).output.fadeSeconds).toBe(0);
   });
 
   test("combines an independent resolution and aspect ratio", () => {

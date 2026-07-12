@@ -57,6 +57,28 @@ export class FfmpegEncoder {
     }
     const { output } = options.config;
     const gopFrames = Math.max(1, Math.round(output.fps / 2));
+    const fadeDuration = Math.min(output.fadeSeconds, options.duration / 2);
+    const fadeOutStart = Math.max(0, options.duration - fadeDuration);
+    const videoFilters = [
+      `scale=${output.width}:${output.height}:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:out_color_matrix=bt709`,
+    ];
+    const audioFilters = [
+      "asetpts=PTS-STARTPTS",
+      `atrim=start=0:end=${options.duration.toFixed(6)}`,
+      `apad=whole_dur=${options.duration.toFixed(6)}`,
+      `atrim=start=0:end=${options.duration.toFixed(6)}`,
+    ];
+    if (fadeDuration > 0) {
+      videoFilters.push(
+        `fade=t=in:st=0:d=${fadeDuration.toFixed(6)}:color=black`,
+        `fade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeDuration.toFixed(6)}:color=black`,
+      );
+      audioFilters.push(
+        `afade=t=in:st=0:d=${fadeDuration.toFixed(6)}:curve=tri:silence=0`,
+        `afade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeDuration.toFixed(6)}:curve=tri:silence=0`,
+      );
+    }
+    videoFilters.push("format=yuv420p", "setsar=1");
     const args = [
       "-hide_banner",
       options.overwrite ? "-y" : "-n",
@@ -88,8 +110,9 @@ export class FfmpegEncoder {
     );
     args.push(
       "-vf",
-      `scale=${output.width}:${output.height}:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:out_color_matrix=bt709,format=yuv420p,setsar=1`,
+      videoFilters.join(","),
     );
+    args.push("-af", audioFilters.join(","));
     args.push(
       "-c:v",
       "libx264",

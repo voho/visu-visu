@@ -6,13 +6,14 @@ import { tmpdir } from "node:os";
 import { analyzeAudio } from "../src/audio/analyze.js";
 import { decodeAudio } from "../src/audio/decode.js";
 import { parseProjectConfig } from "../src/config.js";
-import { DELIVERY_AUDIO_BITRATE } from "../src/render/encoder.js";
+import { DELIVERY_AUDIO_BITRATE, FfmpegEncoder } from "../src/render/encoder.js";
 import { renderVideo } from "../src/render/render.js";
 import type { AudioAnalysis } from "../src/types.js";
 
 const directory = join(tmpdir(), `visu-visu-render-test-${process.pid}`);
 const audioPath = join(directory, "fixture.wav");
 const outputPath = join(directory, "duration.mp4");
+const fadeOutputPath = join(directory, "fade.mp4");
 let analysis: AudioAnalysis;
 
 beforeAll(async () => {
@@ -27,7 +28,7 @@ beforeAll(async () => {
       "-f",
       "lavfi",
       "-i",
-      "sine=frequency=220:duration=1:sample_rate=24000",
+      "sine=frequency=220:duration=7:sample_rate=24000",
       "-c:a",
       "pcm_s16le",
       audioPath,
@@ -43,7 +44,7 @@ afterAll(async () => {
 });
 
 describe("video render integration", () => {
-  test("quantizes duration to complete frames and muxes matching A/V output", async () => {
+  test("quantizes duration, fades both ends, and muxes matching A/V output", async () => {
     const config = parseProjectConfig({
       output: { width: 160, height: 160, fps: 12 },
       visual: { spectrumBands: 16, bokehCount: 4, grain: 0 },
@@ -139,6 +140,132 @@ describe("video render integration", () => {
       maximumBFrames = Math.max(maximumBFrames, consecutiveBFrames);
     }
     expect(maximumBFrames).toBeLessThanOrEqual(2);
+
+  });
+
+  test("encodes complete three-second picture and silence fades", async () => {
+    const width = 160;
+    const height = 160;
+    const fps = 12;
+    const duration = 6.5;
+    const frameCount = duration * fps;
+    const config = parseProjectConfig({
+      output: {
+        width,
+        height,
+        fps,
+        renderScale: 0.5,
+        crf: 30,
+        preset: "ultrafast",
+        fadeSeconds: 3,
+      },
+      visual: { spectrumBands: 16, bokehCount: 0, grain: 0 },
+    });
+    const encoder = await FfmpegEncoder.create({
+      audioPath,
+      outputPath: fadeOutputPath,
+      config,
+      start: 0.5,
+      duration,
+      frameCount,
+      inputWidth: width,
+      inputHeight: height,
+      overwrite: true,
+    });
+    const whiteFrame = Buffer.alloc(width * height * 4, 255);
+    for (let index = 0; index < frameCount; index += 1) await encoder.write(whiteFrame);
+    await encoder.finish();
+
+    const decodedVideo = spawnSync(
+      "ffmpeg",
+      [
+        "-v",
+        "error",
+        "-i",
+        fadeOutputPath,
+        "-map",
+        "0:v:0",
+        "-vf",
+        "scale=32:32",
+        "-pix_fmt",
+        "rgb24",
+        "-f",
+        "rawvideo",
+        "pipe:1",
+      ],
+      { maxBuffer: 2 * 1024 * 1024 },
+    );
+    if (decodedVideo.status !== 0) {
+      throw new Error(`Could not decode fade video: ${decodedVideo.stderr.toString()}`);
+    }
+    const frameBytes = 32 * 32 * 3;
+    expect(decodedVideo.stdout.byteLength).toBe(frameBytes * frameCount);
+    const frameMean = (frameIndex: number): number => {
+      const start = frameIndex * frameBytes;
+      let sum = 0;
+      for (let index = start; index < start + frameBytes; index += 1) {
+        sum += decodedVideo.stdout[index] ?? 0;
+      }
+      return sum / frameBytes;
+    };
+    const middleMean = frameMean(Math.round(3.25 * fps));
+    expect(frameMean(0)).toBeLessThan(2);
+    expect(middleMean).toBeGreaterThan(240);
+    expect(frameMean(frameCount - 1)).toBeLessThan(12);
+    const videoFadeInRatio = frameMean(Math.round(1.5 * fps)) / middleMean;
+    const videoFadeOutRatio = frameMean(Math.round(5 * fps)) / middleMean;
+    expect(videoFadeInRatio).toBeGreaterThan(0.35);
+    expect(videoFadeInRatio).toBeLessThan(0.65);
+    expect(videoFadeOutRatio).toBeGreaterThan(0.35);
+    expect(videoFadeOutRatio).toBeLessThan(0.65);
+
+    const decodedAudio = spawnSync(
+      "ffmpeg",
+      [
+        "-v",
+        "error",
+        "-i",
+        fadeOutputPath,
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-f",
+        "f32le",
+        "pipe:1",
+      ],
+      { maxBuffer: 2 * 1024 * 1024 },
+    );
+    if (decodedAudio.status !== 0) {
+      throw new Error(`Could not decode fade audio: ${decodedAudio.stderr.toString()}`);
+    }
+    const sampleCount = Math.floor(decodedAudio.stdout.byteLength / 4);
+    const rms = (start: number, end: number): number => {
+      let squareSum = 0;
+      for (let index = start; index < end; index += 1) {
+        const sample = decodedAudio.stdout.readFloatLE(index * 4);
+        squareSum += sample * sample;
+      }
+      return Math.sqrt(squareSum / Math.max(1, end - start));
+    };
+    const sampleRate = 48_000;
+    const windowSamples = Math.round(0.2 * sampleRate);
+    const windowAt = (seconds: number): number => {
+      const center = Math.round(seconds * sampleRate);
+      return rms(center - windowSamples / 2, center + windowSamples / 2);
+    };
+    const middleRms = windowAt(3.25);
+    expect(middleRms).toBeGreaterThan(0.02);
+    expect(rms(0, windowSamples) / middleRms).toBeLessThan(0.1);
+    expect(rms(sampleCount - windowSamples, sampleCount) / middleRms).toBeLessThan(0.1);
+    const audioFadeInRatio = windowAt(1.5) / middleRms;
+    const audioFadeOutRatio = windowAt(5) / middleRms;
+    expect(audioFadeInRatio).toBeGreaterThan(0.35);
+    expect(audioFadeInRatio).toBeLessThan(0.65);
+    expect(audioFadeOutRatio).toBeGreaterThan(0.35);
+    expect(audioFadeOutRatio).toBeLessThan(0.65);
   });
 
   test("rejects analysis sampled at a different output frame rate", async () => {

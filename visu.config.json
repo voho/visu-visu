@@ -6,7 +6,8 @@
     "fps": 30,
     "renderScale": 1,
     "crf": 8,
-    "preset": "slow"
+    "preset": "slow",
+    "fadeSeconds": 3
   },
   "text": {
     "title": "",

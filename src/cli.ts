@@ -38,6 +38,7 @@ Render options:
       --artist <text>       On-screen and file metadata artist
       --start <seconds>     Start within the song
       --duration <seconds>  Render only this many seconds
+      --fade <seconds>      Fade picture/audio at both ends (default: 3)
       --quality <mode>      final or preview
   -y, --overwrite           Replace an existing output
 
@@ -92,6 +93,7 @@ function overrideConfig(
     artist?: string;
     quality?: string;
     bands?: string;
+    fade?: string;
   },
 ): ProjectConfig {
   const mutable = structuredClone(config);
@@ -117,6 +119,8 @@ function overrideConfig(
   const fps = numericOption(options.fps, "fps");
   if (fps !== undefined) mutable.output.fps = fps;
   const renderScale = numericOption(options.renderScale, "render-scale");
+  const fade = numericOption(options.fade, "fade");
+  if (fade !== undefined) mutable.output.fadeSeconds = fade;
   const bands = numericOption(options.bands, "bands");
   if (bands !== undefined) mutable.visual.spectrumBands = bands;
   if (options.seed !== undefined) mutable.visual.seed = options.seed;
@@ -187,6 +191,7 @@ async function runRender(args: string[]): Promise<void> {
       artist: { type: "string" },
       start: { type: "string" },
       duration: { type: "string" },
+      fade: { type: "string" },
       quality: { type: "string" },
       overwrite: { type: "boolean", short: "y" },
     },
@@ -207,6 +212,7 @@ async function runRender(args: string[]): Promise<void> {
     ...(values.seed === undefined ? {} : { seed: values.seed }),
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
+    ...(values.fade === undefined ? {} : { fade: values.fade }),
     ...(values.quality === undefined ? {} : { quality: values.quality }),
   });
   if (!config.text.title) {

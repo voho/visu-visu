@@ -8,6 +8,8 @@ Text and signal graphics use an aspect-aware safe composition. Landscape output 
 
 Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceeds the requested 320 kbps quality while remaining more compatible with MP4 upload pipelines than an MP3 stream.
 
+Picture and audio fade in together from black and silence over the first three seconds, then fade back to black and silence over the final three seconds. The fades happen inside the existing runtime; they do not add silent lead-in or tail time. Outputs shorter than six seconds divide their available duration evenly between the two ramps. Set `--fade 0` to disable them or `--fade <seconds>` to choose another duration.
+
 Final renders are high-fidelity upload masters: Canvas runs at the native delivery resolution, then FFmpeg encodes H.264 High Profile at CRF 8 with the slow preset, BT.709 color, two B-frames, and a closed half-frame-rate GOP. This is near-transparent rather than mathematically lossless, and intentionally produces larger, slower files that give YouTube and other platforms a cleaner source for their own transcode. The format follows [YouTube's recommended upload settings](https://support.google.com/youtube/answer/1722171); use preview quality while tuning.
 
 ## Showcase
@@ -96,7 +98,8 @@ bun run render -- ./song.wav --config ./visu.config.json
     "fps": 30,
     "renderScale": 1,
     "crf": 8,
-    "preset": "slow"
+    "preset": "slow",
+    "fadeSeconds": 3
   },
   "text": {
     "title": "",
@@ -128,6 +131,8 @@ Useful output shorthands:
 Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `--duration` is quantized upward to complete video frames. For example, `0.51` seconds at 12 fps becomes 7 frames and is reported as `0.58` seconds, matching the encoded stream.
+
+`fadeSeconds` controls synchronized picture-to-black and audio-to-silence ramps at both ends. Audio is timestamp-reset after source seeking, padded if frame quantization extends past the available source by a fraction of a frame, and trimmed to the exact video duration before fading.
 
 `renderScale` controls the internal Canvas resolution independently of the encoded resolution. Final quality defaults to `1`, so a Full HD master is drawn natively at `1920×1080` with no source upscale. `--quality preview` switches to a half-scale Canvas, CRF 20, and the `veryfast` encoder preset while still producing the requested delivery dimensions. Explicit `--quality final` restores native scale, CRF 8, and the `slow` preset even when a project config contains draft settings.
 

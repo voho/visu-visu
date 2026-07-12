@@ -37,9 +37,9 @@ The Canvas2D scene currently has these layers:
 
 ### 4. Encode
 
-[`src/render/encoder.ts`](../src/render/encoder.ts) streams raw RGBA frames to FFmpeg with backpressure. FFmpeg applies the Lanczos delivery filter (a spatial resize only when internal and delivery dimensions differ), encodes H.264 High-profile video with BT.709 metadata, two B-frames, four references, and a fixed closed GOP, seeks the original source audio to the same start time, encodes stereo AAC-LC at 48 kHz with a 384 kbps target, and muxes an MP4 with fast-start metadata.
+[`src/render/encoder.ts`](../src/render/encoder.ts) streams raw RGBA frames to FFmpeg with backpressure. FFmpeg applies the Lanczos delivery filter (a spatial resize only when internal and delivery dimensions differ), synchronized picture-to-black and audio-to-silence fades, then encodes H.264 High-profile video with BT.709 metadata, two B-frames, four references, and a fixed closed GOP. It seeks the original source audio to the same start time, resets its local timestamp, pads and trims it to the frame-quantized video duration, encodes stereo AAC-LC at 48 kHz with a 384 kbps target, and muxes an MP4 with fast-start metadata.
 
-Audio is normalized to a platform-oriented delivery profile: AAC-LC, stereo, 48 kHz, and 384 kbps. The source audio is always mapped explicitly, and integration tests probe the finished stream to prevent silent-video regressions.
+Audio is normalized to a platform-oriented delivery profile: AAC-LC, stereo, 48 kHz, and 384 kbps. The source audio is always mapped explicitly. Integration tests decode finished picture and PCM data to verify the full three-second fade slopes, black endpoints, silent endpoints, excerpt-local timing, and non-silent midpoint in addition to codec metadata.
 
 Requested durations are converted to a whole frame count once, before rendering and encoding. The reported duration, FFmpeg limit, and video frame count therefore share one value. Source-file hash verification lives in the render core, so library callers receive the same cache/audio mismatch protection as the CLI.
 

@@ -11,6 +11,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     renderScale: 1,
     crf: 8,
     preset: "slow",
+    fadeSeconds: 3,
   },
   text: {
     title: "",
@@ -124,6 +125,13 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       ),
       crf: integer(output.crf, DEFAULT_CONFIG.output.crf, "output.crf", 0, 51),
       preset: preset as ProjectConfig["output"]["preset"],
+      fadeSeconds: boundedNumber(
+        output.fadeSeconds,
+        DEFAULT_CONFIG.output.fadeSeconds,
+        "output.fadeSeconds",
+        0,
+        30,
+      ),
     },
     text: {
       title: stringValue(text.title, DEFAULT_CONFIG.text.title, "text.title").trim(),

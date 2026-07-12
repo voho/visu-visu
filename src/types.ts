@@ -8,6 +8,7 @@ export interface OutputConfig {
   renderScale: number;
   crf: number;
   preset: "ultrafast" | "veryfast" | "fast" | "medium" | "slow";
+  fadeSeconds: number;
 }
 
 export interface TextConfig {
