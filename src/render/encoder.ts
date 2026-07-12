@@ -85,21 +85,37 @@ export class FfmpegEncoder {
       "-frames:v",
       String(options.frameCount),
     );
-    if (options.inputWidth !== output.width || options.inputHeight !== output.height) {
-      args.push(
-        "-vf",
-        `scale=${output.width}:${output.height}:flags=lanczos,setsar=1`,
-      );
-    }
+    args.push(
+      "-vf",
+      `scale=${output.width}:${output.height}:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:out_color_matrix=bt709,format=yuv420p,setsar=1`,
+    );
     args.push(
       "-c:v",
       "libx264",
       "-preset",
       output.preset,
+      "-tune",
+      "animation",
       "-crf",
       String(output.crf),
+      "-profile:v",
+      "high",
+      "-g",
+      String(output.fps * 2),
+      "-keyint_min",
+      String(output.fps),
       "-pix_fmt",
       "yuv420p",
+      "-x264-params",
+      "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+      "-color_range",
+      "tv",
+      "-color_primaries",
+      "bt709",
+      "-color_trc",
+      "bt709",
+      "-colorspace",
+      "bt709",
       "-c:a",
       "aac",
       "-profile:a",

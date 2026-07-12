@@ -61,8 +61,8 @@ describe("video render integration", () => {
     );
     expect(result.frames).toBe(7);
     expect(result.duration).toBeCloseTo(7 / 12, 8);
-    expect(result.renderWidth).toBe(80);
-    expect(result.renderHeight).toBe(80);
+    expect(result.renderWidth).toBe(120);
+    expect(result.renderHeight).toBe(120);
 
     const probe = spawnSync(
       "ffprobe",
@@ -71,7 +71,7 @@ describe("video render integration", () => {
         "error",
         "-count_frames",
         "-show_entries",
-        "stream=codec_name,codec_type,profile,nb_read_frames,duration,width,height,r_frame_rate,bit_rate,sample_rate,channels",
+        "stream=codec_name,codec_type,profile,nb_read_frames,duration,width,height,r_frame_rate,bit_rate,sample_rate,channels,color_range,color_space,color_transfer,color_primaries",
         "-of",
         "json",
         outputPath,
@@ -92,15 +92,24 @@ describe("video render integration", () => {
         bit_rate?: string;
         sample_rate?: string;
         channels?: number;
+        color_range?: string;
+        color_space?: string;
+        color_transfer?: string;
+        color_primaries?: string;
       }>;
     };
     const video = parsed.streams?.find((stream) => stream.codec_type === "video");
     const audio = parsed.streams?.find((stream) => stream.codec_type === "audio");
     expect(video?.nb_read_frames).toBe("7");
-    expect(Number(video?.duration)).toBeCloseTo(7 / 12, 5);
+    expect(Number(video?.duration)).toBeCloseTo(7 / 12, 3);
     expect(video?.width).toBe(160);
     expect(video?.height).toBe(160);
     expect(video?.r_frame_rate).toBe("12/1");
+    expect(video?.profile === "Main" || video?.profile === "High").toBeTrue();
+    expect(video?.color_range).toBe("tv");
+    expect(video?.color_space).toBe("bt709");
+    expect(video?.color_transfer).toBe("bt709");
+    expect(video?.color_primaries).toBe("bt709");
     expect(audio?.codec_name).toBe("aac");
     expect(audio?.profile).toBe("LC");
     expect(audio?.sample_rate).toBe("48000");

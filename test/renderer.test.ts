@@ -24,18 +24,33 @@ describe("visualizer renderer", () => {
       visual: { bokehCount: 12, spectrumBands: 32 },
     });
     const analysis = analyzeAudio(pcm, 12, 32);
-    const fullTimelineRenderer = new VisualizerRenderer(config, "fixed-seed");
-    const clippedTimelineRenderer = new VisualizerRenderer(config, "fixed-seed");
-    const first = fullTimelineRenderer.render(analysis, 0.5);
-    const second = clippedTimelineRenderer.render(analysis, 0.5);
+    analysis.frames[4]!.onset = 0.08;
+    analysis.frames[5]!.onset = 0.9;
+    analysis.frames[6]!.onset = 0.06;
+    const renderer = new VisualizerRenderer(config, "fixed-seed");
+    const freshRenderer = new VisualizerRenderer(config, "fixed-seed");
+    const first = renderer.render(analysis, 0.5);
     const digest = (buffer: Buffer): string => createHash("sha256").update(buffer).digest("hex");
+    const firstDigest = digest(first);
 
     expect(first.byteLength).toBe(320 * 240 * 4);
-    expect(digest(first)).toBe(digest(second));
+    renderer.render(analysis, 0.2);
+    renderer.render(analysis, 0.8);
+    const replayed = renderer.render(analysis, 0.5);
+    const fresh = freshRenderer.render(analysis, 0.5);
+    expect(digest(first)).toBe(firstDigest);
+    expect(digest(replayed)).toBe(firstDigest);
+    expect(digest(fresh)).toBe(firstDigest);
+    expect(digest(new VisualizerRenderer(config, "other-seed").render(analysis, 0.5))).not.toBe(
+      firstDigest,
+    );
 
-    const earlier = fullTimelineRenderer.render(analysis, 0.2);
-    const earlierDigest = digest(earlier);
-    fullTimelineRenderer.render(analysis, 0.8);
-    expect(digest(earlier)).toBe(earlierDigest);
+    const portraitConfig = parseProjectConfig({
+      output: { width: 180, height: 320, fps: 12 },
+      text: { title: "Portrait Signal", artist: "Test" },
+      visual: { bokehCount: 8, spectrumBands: 32 },
+    });
+    const portrait = new VisualizerRenderer(portraitConfig, "fixed-seed").render(analysis, 0.5);
+    expect(portrait.byteLength).toBe(180 * 320 * 4);
   });
 });

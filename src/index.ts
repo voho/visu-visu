@@ -14,6 +14,6 @@ export { RealFft } from "./math/fft.js";
 export { createRandom, deriveSeed, hashString } from "./math/random.js";
 export { renderVideo } from "./render/render.js";
 export { VisualizerRenderer } from "./render/renderer.js";
-export { createSafeLayout } from "./render/layout.js";
+export { createSafeLayout, safeGraphRadius } from "./render/layout.js";
 export type { SafeLayout } from "./render/layout.js";
 export type * from "./types.js";

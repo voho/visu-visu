@@ -2,7 +2,7 @@ node_modules/
 dist/
 renders/
 *.mp4
-!loop.mp4
+!test-e2e/loop.mp4
 *.webm
 *.mov
 *.analysis.json

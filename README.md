@@ -2,7 +2,7 @@
 
 `visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first, then renders every video frame from absolute time, cached features, and a seeded visual plan.
 
-The initial preset is **Rainbow Signal Dream**: a slow prismatic noise-and-bokeh field, a rainbow spectral ribbon, layered waveform echoes, onset blooms, vignette, and grain. Loudness controls exposure and breathing, bass expands the bokeh, mids move the atmosphere, treble sharpens detail, and spectral flux drives brief color accents. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
+The initial preset is **Rainbow Signal Dream**: a slow prismatic noise-and-bokeh field, flowing aurora ribbons, a circular spectral halo, tunnel-like spectrum echoes, layered waveforms, music-triggered shockwaves, glints, vignette, and grain. Loudness controls exposure and breathing, bass expands the scene, mids bend its motion, treble sharpens detail, and spectral flux drives short color accents. Every layer is derived from absolute time and seeded analysis, so the result is reactive without sacrificing reproducibility. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
 
 Text and signal graphics use an aspect-aware safe composition. Landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
 
@@ -10,11 +10,11 @@ Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceed
 
 ## Showcase
 
-[![Rainbow Signal Dream generated from the loop fixture](./docs/showcase-loop.png)](./loop.mp4)
+[![Rainbow Signal Dream generated from the loop fixture](./docs/showcase-loop.png)](./test-e2e/loop.mp4)
 
-[Watch the generated MP4](./loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
+[Watch the generated Full HD MP4](./test-e2e/loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
 
-Regenerate the showcase locally with `bun run test:loop`.
+Regenerate the committed Full HD showcase with `bun run showcase:loop`.
 
 ## Quick start
 
@@ -35,7 +35,7 @@ bun run render -- ./song.mp3 \
 
 Every MP4 includes stereo AAC-LC audio at 48 kHz and a 384 kbps target bitrate. This exceeds the requested 320 kbps compressed-audio quality while retaining broad upload compatibility.
 
-The default is `1920×1280` at 30 fps. This deliberately interprets “Full HD + 3:2” as a Full-HD-width, 3:2 frame. Standard Full HD is 16:9, so use either of these when that is the intended format:
+The default is standard Full HD: `1920×1080` at 30 fps. Other delivery shapes retain a Full HD long edge when selected explicitly:
 
 ```sh
 bun run render -- ./song.mp3 --resolution fullhd --ratio 16:9
@@ -48,13 +48,15 @@ For a quick, eight-second draft:
 bun run preview -- ./song.mp3 --overwrite
 ```
 
-The preview script renders at `960×640` with a faster encode preset. Set `--start 45` to inspect a later section.
+The preview script still writes a `1920×1080` delivery file, but renders its Canvas scene at half scale and uses a faster quality profile. Set `--start 45` to inspect a later section.
 
-For the committed six-second loop fixture, one command writes `loop.mp4` in the project root:
+For a quick smoke test, one command writes a 640×360 draft to the ignored root-level `loop.mp4`:
 
 ```sh
 bun run test:loop
 ```
+
+Use `bun run showcase:loop` when intentionally refreshing the committed Full HD showcase.
 
 ## Deterministic two-stage processing
 
@@ -88,10 +90,10 @@ bun run render -- ./song.wav --config ./visu.config.json
   "version": 1,
   "output": {
     "width": 1920,
-    "height": 1280,
+    "height": 1080,
     "fps": 30,
-    "renderScale": 0.5,
-    "crf": 18,
+    "renderScale": 0.75,
+    "crf": 17,
     "preset": "veryfast"
   },
   "text": {
@@ -125,7 +127,7 @@ Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `--duration` is quantized upward to complete video frames. For example, `0.51` seconds at 12 fps becomes 7 frames and is reported as `0.58` seconds, matching the encoded stream.
 
-`renderScale` controls the internal Canvas resolution independently of the encoded resolution. The `0.5` default renders one quarter as many pixels and lets FFmpeg upscale with Lanczos filtering, which fits the soft background aesthetic and substantially reduces render time. Use `--render-scale 1` for native-resolution line and text rendering, or `--render-scale 0.25` for very fast drafts.
+`renderScale` controls the internal Canvas resolution independently of the encoded resolution. The `0.75` default renders the scene at `1440×810`, then lets FFmpeg perform one high-quality Lanczos upscale to Full HD. This keeps typography and signal lines crisp while avoiding the cost of native-resolution atmospheric effects. Use `--render-scale 1` for native-resolution rendering, or `--quality preview` for a faster half-scale draft that still produces a Full HD file.
 
 ## Platform-safe composition
 
@@ -161,7 +163,7 @@ song
                  └─ FFmpeg H.264 + original audio AAC → .mp4
 ```
 
-The renderer never reads wall-clock time and never calls `Math.random()`. Background objects have fixed seeded identities and analytic motion, while waveform trails are earlier analysis samples rather than stateful feedback. This keeps seeking and parallel frame rendering possible later.
+The renderer never reads wall-clock time and never calls `Math.random()`. Aurora, bokeh, sparkles, and fog have fixed seeded identities and analytic motion; halo, tunnel, shockwave, spectrum, and waveform layers read current or historical analysis frames by absolute timestamp. This keeps direct seeking deterministic and leaves future parallel frame rendering possible.
 
 See [docs/architecture.md](./docs/architecture.md) for module boundaries and the intended studio evolution.
 

@@ -8,12 +8,13 @@ import {
 } from "../src/config.js";
 
 describe("project configuration", () => {
-  test("uses a 3:2 full-HD-width default", () => {
+  test("uses a standard Full HD default", () => {
     const config = parseProjectConfig({});
     expect(config.output.width).toBe(1920);
-    expect(config.output.height).toBe(1280);
-    expect(config.output.width / config.output.height).toBe(1.5);
-    expect(config.output.renderScale).toBe(0.5);
+    expect(config.output.height).toBe(1080);
+    expect(config.output.width / config.output.height).toBeCloseTo(16 / 9, 8);
+    expect(config.output.renderScale).toBe(0.75);
+    expect(config.output.crf).toBe(17);
     expect(config.output.preset).toBe("veryfast");
     expect(config).toEqual(DEFAULT_CONFIG);
   });

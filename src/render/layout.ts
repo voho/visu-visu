@@ -69,3 +69,12 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
     graphBottom: height * profile.graphBottom,
   };
 }
+
+export function safeGraphRadius(layout: SafeLayout): number {
+  return Math.min(
+    layout.centerX - layout.left,
+    layout.right - layout.centerX,
+    layout.horizon - layout.graphTop,
+    layout.graphBottom - layout.horizon,
+  );
+}

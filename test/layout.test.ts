@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createSafeLayout } from "../src/render/layout.js";
+import { createSafeLayout, safeGraphRadius } from "../src/render/layout.js";
 
 function expectOrdered(layout: ReturnType<typeof createSafeLayout>): void {
   expect(layout.left).toBeLessThan(layout.centerX);
@@ -9,6 +9,11 @@ function expectOrdered(layout: ReturnType<typeof createSafeLayout>): void {
   expect(layout.graphTop).toBeLessThan(layout.horizon);
   expect(layout.horizon).toBeLessThan(layout.graphBottom);
   expect(layout.graphBottom).toBeLessThan(layout.bottom);
+  const radius = safeGraphRadius(layout);
+  expect(layout.centerX - radius).toBeGreaterThanOrEqual(layout.left);
+  expect(layout.centerX + radius).toBeLessThanOrEqual(layout.right);
+  expect(layout.horizon - radius).toBeGreaterThanOrEqual(layout.graphTop);
+  expect(layout.horizon + radius).toBeLessThanOrEqual(layout.graphBottom);
 }
 
 describe("platform-safe render layout", () => {

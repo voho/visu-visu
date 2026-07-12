@@ -2,10 +2,10 @@
   "version": 1,
   "output": {
     "width": 1920,
-    "height": 1280,
+    "height": 1080,
     "fps": 30,
-    "renderScale": 0.5,
-    "crf": 18,
+    "renderScale": 0.75,
+    "crf": 17,
     "preset": "veryfast"
   },
   "text": {

@@ -6,10 +6,10 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   version: 1,
   output: {
     width: 1920,
-    height: 1280,
+    height: 1080,
     fps: 30,
-    renderScale: 0.5,
-    crf: 18,
+    renderScale: 0.75,
+    crf: 17,
     preset: "veryfast",
   },
   text: {
@@ -188,7 +188,7 @@ export async function loadProjectConfig(configPath?: string): Promise<ProjectCon
 
 export function parseSize(value: string): { width: number; height: number } {
   const match = /^(\d{2,5})x(\d{2,5})$/i.exec(value.trim());
-  if (!match) throw new Error(`Invalid size "${value}". Use WIDTHxHEIGHT, for example 1920x1280.`);
+  if (!match) throw new Error(`Invalid size "${value}". Use WIDTHxHEIGHT, for example 1920x1080.`);
   const width = Number(match[1]);
   const height = Number(match[2]);
   const parsed = parseProjectConfig({ output: { width, height } });

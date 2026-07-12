@@ -28,11 +28,11 @@ Render options:
   -c, --config <file>       JSON project config (default: built-in values)
       --analysis <file>     Reuse a previously saved analysis
       --save-analysis <f>   Save newly computed analysis for later renders
-      --size <WxH>          Override output size (default: 1920x1280, 3:2)
+      --size <WxH>          Override output size (default: 1920x1080, 16:9)
       --ratio <W:H>         Aspect ratio shorthand, for example 16:9 or 3:2
       --resolution <name>   Long-edge preset: hd, fullhd, or 4k
       --fps <number>        Override frame rate (12–60, default: 30)
-      --render-scale <n>    Internal resolution scale (0.25–1, default: 0.5)
+      --render-scale <n>    Internal resolution scale (0.25–1, default: 0.75)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
@@ -124,8 +124,8 @@ function overrideConfig(
   if (options.artist !== undefined) mutable.text.artist = options.artist;
   if (options.quality !== undefined) {
     if (options.quality === "preview") {
-      mutable.output.crf = 26;
-      mutable.output.preset = "ultrafast";
+      mutable.output.crf = 20;
+      mutable.output.preset = "veryfast";
       if (renderScale === undefined) mutable.output.renderScale = 0.5;
     } else if (options.quality !== "final") {
       throw new Error('--quality must be either "preview" or "final"');
