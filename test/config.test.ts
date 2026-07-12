@@ -13,9 +13,10 @@ describe("project configuration", () => {
     expect(config.output.width).toBe(1920);
     expect(config.output.height).toBe(1080);
     expect(config.output.width / config.output.height).toBeCloseTo(16 / 9, 8);
-    expect(config.output.renderScale).toBe(0.75);
-    expect(config.output.crf).toBe(17);
-    expect(config.output.preset).toBe("veryfast");
+    expect(config.output.renderScale).toBe(1);
+    expect(config.output.crf).toBe(8);
+    expect(config.output.preset).toBe("slow");
+    expect(config.visual.grain).toBe(0.018);
     expect(config).toEqual(DEFAULT_CONFIG);
   });
 

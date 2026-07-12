@@ -43,6 +43,11 @@ export async function renderVideo(
       `Analysis has ${analysis.spectrumBands} spectrum bands but the project requests ${request.config.visual.spectrumBands}`,
     );
   }
+  if (analysis.fps !== request.config.output.fps) {
+    throw new Error(
+      `Analysis uses ${analysis.fps} fps but the project requests ${request.config.output.fps} fps`,
+    );
+  }
   if (request.start < 0 || request.start >= analysis.duration) {
     throw new Error(`Start time must be between 0 and ${analysis.duration.toFixed(3)} seconds`);
   }

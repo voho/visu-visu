@@ -2,11 +2,13 @@
 
 `visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first, then renders every video frame from absolute time, cached features, and a seeded visual plan.
 
-The initial preset is **Rainbow Signal Dream**: a slow prismatic noise-and-bokeh field, flowing aurora ribbons, a circular spectral halo, tunnel-like spectrum echoes, layered waveforms, music-triggered shockwaves, glints, vignette, and grain. Loudness controls exposure and breathing, bass expands the scene, mids bend its motion, treble sharpens detail, and spectral flux drives short color accents. Every layer is derived from absolute time and seeded analysis, so the result is reactive without sacrificing reproducibility. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
+The initial preset is **Rainbow Signal Dream**: a prismatic noise-and-bokeh field, flowing aurora ribbons, morphing halo and figure-eight forms, a forward-travelling spectrum tunnel, layered waveforms, music-triggered shockwaves and prism streaks, glints, vignette, and restrained grain. A deterministic visual conductor reads rolling energy, onset density, and build/drop trend so quiet passages open up, builds accelerate through depth, and peaks add trails, camera energy, and stronger hero shapes. Loudness controls exposure and breathing, bass expands the scene, mids bend its motion, treble sharpens detail, and spectral flux drives short color accents. Every layer is derived from absolute time and seeded analysis, so the result is reactive without sacrificing reproducibility. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
 
 Text and signal graphics use an aspect-aware safe composition. Landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
 
 Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceeds the requested 320 kbps quality while remaining more compatible with MP4 upload pipelines than an MP3 stream.
+
+Final renders are high-fidelity upload masters: Canvas runs at the native delivery resolution, then FFmpeg encodes H.264 High Profile at CRF 8 with the slow preset, BT.709 color, two B-frames, and a closed half-frame-rate GOP. This is near-transparent rather than mathematically lossless, and intentionally produces larger, slower files that give YouTube and other platforms a cleaner source for their own transcode. The format follows [YouTube's recommended upload settings](https://support.google.com/youtube/answer/1722171); use preview quality while tuning.
 
 ## Showcase
 
@@ -14,7 +16,7 @@ Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceed
 
 [Watch the generated Full HD MP4](./test-e2e/loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
 
-Regenerate the committed Full HD showcase with `bun run showcase:loop`.
+Regenerate the committed native Full HD upload-master showcase with `bun run showcase:loop`.
 
 ## Quick start
 
@@ -35,7 +37,7 @@ bun run render -- ./song.mp3 \
 
 Every MP4 includes stereo AAC-LC audio at 48 kHz and a 384 kbps target bitrate. This exceeds the requested 320 kbps compressed-audio quality while retaining broad upload compatibility.
 
-The default is standard Full HD: `1920×1080` at 30 fps. Other delivery shapes retain a Full HD long edge when selected explicitly:
+The default is a native-resolution, high-fidelity Full HD master: `1920×1080` at 30 fps. Other delivery shapes retain a Full HD long edge when selected explicitly:
 
 ```sh
 bun run render -- ./song.mp3 --resolution fullhd --ratio 16:9
@@ -92,9 +94,9 @@ bun run render -- ./song.wav --config ./visu.config.json
     "width": 1920,
     "height": 1080,
     "fps": 30,
-    "renderScale": 0.75,
-    "crf": 17,
-    "preset": "veryfast"
+    "renderScale": 1,
+    "crf": 8,
+    "preset": "slow"
   },
   "text": {
     "title": "",
@@ -105,7 +107,7 @@ bun run render -- ./song.wav --config ./visu.config.json
     "intensity": 1,
     "bokehCount": 48,
     "spectrumBands": 64,
-    "grain": 0.035,
+    "grain": 0.018,
     "vignette": 0.28,
     "lowFlash": true
   }
@@ -127,7 +129,7 @@ Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `--duration` is quantized upward to complete video frames. For example, `0.51` seconds at 12 fps becomes 7 frames and is reported as `0.58` seconds, matching the encoded stream.
 
-`renderScale` controls the internal Canvas resolution independently of the encoded resolution. The `0.75` default renders the scene at `1440×810`, then lets FFmpeg perform one high-quality Lanczos upscale to Full HD. This keeps typography and signal lines crisp while avoiding the cost of native-resolution atmospheric effects. Use `--render-scale 1` for native-resolution rendering, or `--quality preview` for a faster half-scale draft that still produces a Full HD file.
+`renderScale` controls the internal Canvas resolution independently of the encoded resolution. Final quality defaults to `1`, so a Full HD master is drawn natively at `1920×1080` with no source upscale. `--quality preview` switches to a half-scale Canvas, CRF 20, and the `veryfast` encoder preset while still producing the requested delivery dimensions. Explicit `--quality final` restores native scale, CRF 8, and the `slow` preset even when a project config contains draft settings.
 
 ## Platform-safe composition
 
@@ -163,7 +165,7 @@ song
                  └─ FFmpeg H.264 + original audio AAC → .mp4
 ```
 
-The renderer never reads wall-clock time and never calls `Math.random()`. Aurora, bokeh, sparkles, and fog have fixed seeded identities and analytic motion; halo, tunnel, shockwave, spectrum, and waveform layers read current or historical analysis frames by absolute timestamp. This keeps direct seeking deterministic and leaves future parallel frame rendering possible.
+The renderer never reads wall-clock time and never calls `Math.random()`. Aurora, bokeh, sparkles, fog, and onset prism events have fixed seeded identities and analytic motion. The section conductor, halo, travelling tunnel, shockwave, spectrum, orbital form, and waveform layers read current, future, or historical analysis frames by absolute timestamp. This keeps direct seeking deterministic and leaves future parallel frame rendering possible.
 
 See [docs/architecture.md](./docs/architecture.md) for module boundaries and the intended studio evolution.
 
@@ -181,4 +183,4 @@ Tests cover the FFT, normalized analysis, strict cache validation, aspect-aware 
 ffprobe -v error -show_streams -show_format ./renders/example.mp4
 ```
 
-Start with `bun run test:loop` or the preview preset while tuning a seed, title, and composition. Use `--render-scale 1` only when the extra native-resolution sharpness is worth the additional render time.
+Start with `bun run test:loop` or the preview preset while tuning a seed, title, and composition. Use final quality for the upload artifact; native-resolution CRF 8 encoding is deliberately slower and larger.

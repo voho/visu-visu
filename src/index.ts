@@ -12,6 +12,8 @@ export {
 } from "./config.js";
 export { RealFft } from "./math/fft.js";
 export { createRandom, deriveSeed, hashString } from "./math/random.js";
+export { deriveVisualState } from "./render/conductor.js";
+export type { VisualState } from "./render/conductor.js";
 export { renderVideo } from "./render/render.js";
 export { VisualizerRenderer } from "./render/renderer.js";
 export { createSafeLayout, safeGraphRadius } from "./render/layout.js";

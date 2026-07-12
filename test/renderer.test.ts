@@ -34,13 +34,14 @@ describe("visualizer renderer", () => {
     const firstDigest = digest(first);
 
     expect(first.byteLength).toBe(320 * 240 * 4);
-    renderer.render(analysis, 0.2);
-    renderer.render(analysis, 0.8);
+    const earlier = renderer.render(analysis, 0.2);
+    const later = renderer.render(analysis, 0.8);
     const replayed = renderer.render(analysis, 0.5);
     const fresh = freshRenderer.render(analysis, 0.5);
     expect(digest(first)).toBe(firstDigest);
     expect(digest(replayed)).toBe(firstDigest);
     expect(digest(fresh)).toBe(firstDigest);
+    expect(digest(earlier)).not.toBe(digest(later));
     expect(digest(new VisualizerRenderer(config, "other-seed").render(analysis, 0.5))).not.toBe(
       firstDigest,
     );

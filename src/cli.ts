@@ -32,7 +32,7 @@ Render options:
       --ratio <W:H>         Aspect ratio shorthand, for example 16:9 or 3:2
       --resolution <name>   Long-edge preset: hd, fullhd, or 4k
       --fps <number>        Override frame rate (12–60, default: 30)
-      --render-scale <n>    Internal resolution scale (0.25–1, default: 0.75)
+      --render-scale <n>    Internal resolution scale (0.25–1, final default: 1)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
@@ -127,7 +127,11 @@ function overrideConfig(
       mutable.output.crf = 20;
       mutable.output.preset = "veryfast";
       if (renderScale === undefined) mutable.output.renderScale = 0.5;
-    } else if (options.quality !== "final") {
+    } else if (options.quality === "final") {
+      mutable.output.crf = 8;
+      mutable.output.preset = "slow";
+      if (renderScale === undefined) mutable.output.renderScale = 1;
+    } else {
       throw new Error('--quality must be either "preview" or "final"');
     }
   }
@@ -236,7 +240,7 @@ async function runRender(args: string[]): Promise<void> {
       ? "native"
       : `${internalSize.width}x${internalSize.height} internal`;
   console.log(
-    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · rainbow drift`,
+    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · prismatic conductor`,
   );
   let lastPercent = -1;
   const result = await renderVideo(

@@ -56,6 +56,7 @@ export class FfmpegEncoder {
       }
     }
     const { output } = options.config;
+    const gopFrames = Math.max(1, Math.round(output.fps / 2));
     const args = [
       "-hide_banner",
       options.overwrite ? "-y" : "-n",
@@ -101,13 +102,19 @@ export class FfmpegEncoder {
       "-profile:v",
       "high",
       "-g",
-      String(output.fps * 2),
+      String(gopFrames),
       "-keyint_min",
-      String(output.fps),
+      String(gopFrames),
+      "-sc_threshold",
+      "0",
+      "-bf",
+      "2",
+      "-refs",
+      "4",
       "-pix_fmt",
       "yuv420p",
       "-x264-params",
-      "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
+      "open-gop=0:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
       "-color_range",
       "tv",
       "-color_primaries",

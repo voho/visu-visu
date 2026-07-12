@@ -45,7 +45,7 @@ afterAll(async () => {
 describe("video render integration", () => {
   test("quantizes duration to complete frames and muxes matching A/V output", async () => {
     const config = parseProjectConfig({
-      output: { width: 160, height: 160, fps: 12, crf: 30, preset: "ultrafast" },
+      output: { width: 160, height: 160, fps: 12 },
       visual: { spectrumBands: 16, bokehCount: 4, grain: 0 },
     });
     const result = await renderVideo(
@@ -61,8 +61,8 @@ describe("video render integration", () => {
     );
     expect(result.frames).toBe(7);
     expect(result.duration).toBeCloseTo(7 / 12, 8);
-    expect(result.renderWidth).toBe(120);
-    expect(result.renderHeight).toBe(120);
+    expect(result.renderWidth).toBe(160);
+    expect(result.renderHeight).toBe(160);
 
     const probe = spawnSync(
       "ffprobe",
@@ -70,8 +70,9 @@ describe("video render integration", () => {
         "-v",
         "error",
         "-count_frames",
+        "-show_frames",
         "-show_entries",
-        "stream=codec_name,codec_type,profile,nb_read_frames,duration,width,height,r_frame_rate,bit_rate,sample_rate,channels,color_range,color_space,color_transfer,color_primaries",
+        "stream=codec_name,codec_type,profile,pix_fmt,has_b_frames,refs,nb_read_frames,duration,width,height,r_frame_rate,bit_rate,sample_rate,channels,color_range,color_space,color_transfer,color_primaries:frame=key_frame,pict_type",
         "-of",
         "json",
         outputPath,
@@ -84,6 +85,9 @@ describe("video render integration", () => {
         codec_name?: string;
         codec_type?: string;
         profile?: string;
+        pix_fmt?: string;
+        has_b_frames?: number;
+        refs?: number;
         nb_read_frames?: string;
         duration?: string;
         width?: number;
@@ -97,6 +101,10 @@ describe("video render integration", () => {
         color_transfer?: string;
         color_primaries?: string;
       }>;
+      frames?: Array<{
+        key_frame?: number;
+        pict_type?: string;
+      }>;
     };
     const video = parsed.streams?.find((stream) => stream.codec_type === "video");
     const audio = parsed.streams?.find((stream) => stream.codec_type === "audio");
@@ -105,7 +113,10 @@ describe("video render integration", () => {
     expect(video?.width).toBe(160);
     expect(video?.height).toBe(160);
     expect(video?.r_frame_rate).toBe("12/1");
-    expect(video?.profile === "Main" || video?.profile === "High").toBeTrue();
+    expect(video?.profile).toBe("High");
+    expect(video?.pix_fmt).toBe("yuv420p");
+    expect(video?.has_b_frames).toBe(2);
+    expect(video?.refs).toBe(4);
     expect(video?.color_range).toBe("tv");
     expect(video?.color_space).toBe("bt709");
     expect(video?.color_transfer).toBe("bt709");
@@ -116,5 +127,37 @@ describe("video render integration", () => {
     expect(audio?.channels).toBe(2);
     expect(DELIVERY_AUDIO_BITRATE).toBeGreaterThanOrEqual(320_000);
     expect(Number(audio?.bit_rate)).toBeGreaterThan(0);
+
+    const videoFrames = (parsed.frames ?? []).filter((frame) => frame.pict_type !== undefined);
+    expect(
+      videoFrames.flatMap((frame, index) => (frame.key_frame === 1 ? [index] : [])),
+    ).toEqual([0, 6]);
+    let consecutiveBFrames = 0;
+    let maximumBFrames = 0;
+    for (const frame of videoFrames) {
+      consecutiveBFrames = frame.pict_type === "B" ? consecutiveBFrames + 1 : 0;
+      maximumBFrames = Math.max(maximumBFrames, consecutiveBFrames);
+    }
+    expect(maximumBFrames).toBeLessThanOrEqual(2);
+  });
+
+  test("rejects analysis sampled at a different output frame rate", async () => {
+    const config = parseProjectConfig({
+      output: { width: 160, height: 160, fps: 24 },
+      visual: { spectrumBands: 16, bokehCount: 0, grain: 0 },
+    });
+    await expect(
+      renderVideo(
+        {
+          audioPath,
+          outputPath: join(directory, "mismatched-fps.mp4"),
+          config,
+          start: 0,
+          duration: 0.25,
+          overwrite: true,
+        },
+        analysis,
+      ),
+    ).rejects.toThrow("Analysis uses 12 fps but the project requests 24 fps");
   });
 });

@@ -9,6 +9,7 @@ import {
   smoothstep,
 } from "../math/random.js";
 import type { AnalysisFrame, AudioAnalysis, ProjectConfig } from "../types.js";
+import { deriveVisualState, type VisualState } from "./conductor.js";
 import { createSafeLayout, safeGraphRadius, type SafeLayout } from "./layout.js";
 
 interface BokehParticle {
@@ -121,7 +122,7 @@ export class VisualizerRenderer {
       radius: randomBetween(random, 0.018, 0.11),
       opacity: randomBetween(random, 0.025, 0.16),
       phase: randomBetween(random, 0, Math.PI * 2),
-      speed: randomBetween(random, 0.002, 0.014),
+      speed: randomBetween(random, 0.0015, 0.006),
       sway: randomBetween(random, 0.008, 0.05),
       depth: randomBetween(random, 0.35, 1),
       spectrumIndex: index % this.config.visual.spectrumBands,
@@ -175,7 +176,7 @@ export class VisualizerRenderer {
     const grainWidth = 192;
     const grainHeight = Math.max(96, Math.round(grainWidth * (this.height / this.width)));
 
-    return Array.from({ length: 12 }, () => {
+    return Array.from({ length: 29 }, () => {
       const canvas = createCanvas(grainWidth, grainHeight);
       const context = canvas.getContext("2d");
       const image = context.createImageData(grainWidth, grainHeight);
@@ -197,6 +198,7 @@ export class VisualizerRenderer {
     const previousB = frameAt(analysis, Math.max(0, time - 0.12));
     const previousC = frameAt(analysis, Math.max(0, time - 0.2));
     const previousD = frameAt(analysis, Math.max(0, time - 0.32));
+    const visual = deriveVisualState(analysis, time);
     const context = this.context;
 
     context.save();
@@ -205,8 +207,8 @@ export class VisualizerRenderer {
     context.globalCompositeOperation = "source-over";
     context.filter = "none";
     context.clearRect(0, 0, this.width, this.height);
-    this.drawBackground(current, time);
-    this.drawAtmosphere(current, time);
+    this.drawBackground(current, time, visual);
+    this.drawAtmosphere(current, time, visual);
     this.drawSparkles(current, time);
     context.save();
     context.beginPath();
@@ -217,15 +219,28 @@ export class VisualizerRenderer {
       this.layout.graphBottom - this.layout.graphTop,
     );
     context.clip();
+    this.applyGraphCamera(current, visual, time);
     this.drawBeatEchoes(analysis, time);
-    this.drawSpectralHalo(current, previousB, time);
-    this.drawSpectrumTunnel(analysis, current, time);
-    this.drawSpectrum(current, time);
-    this.drawWaveform(previousD, time, -72, 0.025, 3.8);
-    this.drawWaveform(previousC, time, -54, 0.045, 3.2);
-    this.drawWaveform(previousB, time, -40, 0.08, 2.5);
-    this.drawWaveform(previousA, time, -18, 0.16, 1.8);
-    this.drawWaveform(current, time, 0, 0.68 + current.onset * 0.22, 1);
+    this.drawPrismStreaks(analysis, time, visual);
+    this.drawSpectralHalo(current, previousB, time, visual);
+    this.drawSpectrumTunnel(analysis, current, time, visual);
+    this.drawSpectrum(current, time, visual);
+    const horizontalPresence = 1 - visual.form * 0.64;
+    const trailEnergy =
+      0.6 + visual.drive * 0.28 + visual.peak * 0.42 + visual.chapter * 0.28;
+    this.drawWaveform(previousD, time, -72, 0.025 * trailEnergy * horizontalPresence, 3.8);
+    this.drawWaveform(previousC, time, -54, 0.045 * trailEnergy * horizontalPresence, 3.2);
+    this.drawWaveform(previousB, time, -40, 0.08 * trailEnergy * horizontalPresence, 2.5);
+    this.drawWaveform(previousA, time, -18, 0.16 * trailEnergy * horizontalPresence, 1.8);
+    this.drawWaveform(
+      current,
+      time,
+      0,
+      (0.54 + visual.drive * 0.18 + visual.beat * 0.12 + current.onset * 0.16) *
+        horizontalPresence,
+      1,
+    );
+    this.drawOrbitalWaveform(current, previousC, time, visual);
     context.restore();
     this.drawPostEffects(current, Math.round(time * this.config.output.fps), time);
     this.drawTypography(analysis, time);
@@ -255,7 +270,7 @@ export class VisualizerRenderer {
     return gradient;
   }
 
-  private drawBackground(frame: AnalysisFrame, time: number): void {
+  private drawBackground(frame: AnalysisFrame, time: number, visual: VisualState): void {
     const context = this.backgroundContext;
     const width = this.backgroundWidth;
     const height = this.backgroundHeight;
@@ -287,13 +302,21 @@ export class VisualizerRenderer {
       context.fillRect(0, 0, width, height);
     }
 
-    this.drawAuroraBackground(frame, time);
+    this.drawAuroraBackground(frame, time, visual);
 
     for (const particle of this.particles) {
       const spectrum = frame.spectrum[particle.spectrumIndex] ?? 0;
       const phase = particle.phase + time * particle.speed * Math.PI * 2;
-      const x = wrap(particle.x + time * particle.speed + Math.sin(phase) * particle.sway) * width;
-      const y = wrap(particle.y - time * particle.speed * 0.31 + Math.cos(phase * 0.72) * particle.sway) * height;
+      const x =
+        (particle.x +
+          Math.sin(phase) * particle.sway +
+          Math.sin(time * 0.014 + particle.phase * 0.7) * 0.07 * particle.depth) *
+        width;
+      const y =
+        (particle.y +
+          Math.cos(phase * 0.72) * particle.sway +
+          Math.cos(time * 0.011 + particle.phase) * 0.05 * particle.depth) *
+        height;
       const radius =
         particle.radius *
         Math.max(width, height) *
@@ -315,10 +338,12 @@ export class VisualizerRenderer {
     context.globalCompositeOperation = "source-over";
 
     const output = this.context;
-    const breathing = 1.025 + frame.rms * 0.022;
-    const rotation = Math.sin(time * 0.023) * 0.004;
+    const breathing = 1.028 + frame.rms * 0.018 + visual.beat * 0.018;
+    const rotation = Math.sin(time * 0.023) * 0.004 + visual.trend * 0.0025;
+    const driftX = Math.sin(time * 0.071 + this.palettePhase) * this.width * 0.008;
+    const driftY = Math.cos(time * 0.059 + this.palettePhase) * this.height * 0.006;
     output.save();
-    output.translate(this.width / 2, this.height / 2);
+    output.translate(this.width / 2 + driftX, this.height / 2 + driftY);
     output.rotate(rotation);
     output.scale(breathing, breathing);
     output.imageSmoothingEnabled = true;
@@ -333,7 +358,11 @@ export class VisualizerRenderer {
     output.restore();
   }
 
-  private drawAuroraBackground(frame: AnalysisFrame, time: number): void {
+  private drawAuroraBackground(
+    frame: AnalysisFrame,
+    time: number,
+    visual: VisualState,
+  ): void {
     const context = this.backgroundContext;
     const width = this.backgroundWidth;
     const height = this.backgroundHeight;
@@ -353,7 +382,10 @@ export class VisualizerRenderer {
         const slowWave =
           Math.sin(
             Math.PI * 2 *
-              (progress * ribbon.frequency + time * ribbon.speed) +
+              (progress * ribbon.frequency +
+                time * ribbon.speed +
+                visual.drive * 0.12 +
+                visual.peak * 0.06) +
               ribbon.phase,
           ) *
           height *
@@ -386,7 +418,9 @@ export class VisualizerRenderer {
         if (point) context.lineTo(point.x, point.y + point.thickness);
       }
       context.closePath();
-      const alpha = 0.025 + frame.rms * 0.04 + frame.onset * 0.025;
+      const alpha =
+        (0.022 + frame.rms * 0.035 + frame.onset * 0.025) *
+        (0.76 + visual.ambient * 0.28 + visual.peak * 0.32);
       const gradient = context.createLinearGradient(0, 0, width, 0);
       gradient.addColorStop(
         0,
@@ -406,11 +440,13 @@ export class VisualizerRenderer {
     context.restore();
   }
 
-  private drawAtmosphere(frame: AnalysisFrame, time: number): void {
+  private drawAtmosphere(frame: AnalysisFrame, time: number, visual: VisualState): void {
     const context = this.context;
     const glowX = this.layout.centerX + Math.sin(time * 0.031) * this.layout.width * 0.09;
     const glowY = this.layout.horizon + Math.cos(time * 0.024) * this.layout.height * 0.05;
-    const radius = Math.max(this.width, this.height) * (0.2 + frame.bass * 0.04);
+    const radius =
+      Math.max(this.width, this.height) *
+      (0.19 + frame.bass * 0.04 + visual.beat * 0.018);
     const glow = context.createRadialGradient(glowX, glowY, 0, glowX, glowY, radius);
     const glowHue = this.palettePhase + time * 3 + frame.centroid * 220;
     glow.addColorStop(0, hsla(glowHue, 96, 64, 0.07 + frame.rms * 0.09));
@@ -451,17 +487,15 @@ export class VisualizerRenderer {
         this.config.visual.intensity;
       if (alpha < 0.012) continue;
       const x =
-        wrap(
-          sparkle.x +
-            time * sparkle.drift * 0.08 +
-            Math.sin(time * sparkle.speed * 0.27 + sparkle.phase) * sparkle.drift,
-        ) * this.width;
+        (sparkle.x +
+          Math.sin(time * sparkle.speed * 0.09 + sparkle.phase) * sparkle.drift +
+          Math.sin(time * 0.016 + sparkle.phase * 0.61) * 0.045) *
+        this.width;
       const y =
-        wrap(
-          sparkle.y -
-            time * sparkle.drift * 0.035 +
-            Math.cos(time * sparkle.speed * 0.22 + sparkle.phase) * sparkle.drift,
-        ) * this.height;
+        (sparkle.y +
+          Math.cos(time * sparkle.speed * 0.07 + sparkle.phase) * sparkle.drift +
+          Math.cos(time * 0.012 + sparkle.phase * 0.77) * 0.035) *
+        this.height;
       const size = sparkle.size * scale * (0.75 + energy * 1.8 + onset * 0.8);
       const hue = this.palettePhase + sparkle.hue + time * 4 + energy * 90;
       context.strokeStyle = hsla(hue, 96, 78, alpha);
@@ -480,12 +514,117 @@ export class VisualizerRenderer {
     context.restore();
   }
 
+  private applyGraphCamera(frame: AnalysisFrame, visual: VisualState, time: number): void {
+    const onset = this.config.visual.lowFlash ? Math.min(visual.beat, 0.42) : visual.beat;
+    const driftX =
+      Math.sin(time * 0.14 + visual.motion * 0.32 + this.palettePhase * 0.01) *
+      this.layout.width *
+      (0.004 + visual.drive * 0.004);
+    const driftY =
+      Math.cos(time * 0.11 + this.palettePhase * 0.014) *
+      this.layout.height *
+      (0.003 + visual.ambient * 0.002);
+    const roll =
+      Math.sin(time * 0.19 + frame.centroid * Math.PI) *
+        (0.0015 + visual.drive * 0.003 + visual.chapter * 0.0015) +
+      visual.trend * 0.002;
+    const scale = 1 + frame.bass * 0.012 + visual.peak * 0.009 + onset * 0.022;
+
+    this.context.translate(this.layout.centerX + driftX, this.layout.horizon + driftY);
+    this.context.rotate(roll);
+    this.context.scale(scale, scale);
+    this.context.translate(-this.layout.centerX, -this.layout.horizon);
+  }
+
+  private drawPrismStreaks(
+    analysis: AudioAnalysis,
+    time: number,
+    visual: VisualState,
+  ): void {
+    const lifetime = 0.68;
+    const currentIndex = Math.min(
+      analysis.frames.length - 1,
+      Math.max(0, Math.round(time * analysis.fps)),
+    );
+    const startIndex = Math.max(1, currentIndex - Math.ceil(lifetime * analysis.fps));
+    const events: number[] = [];
+    for (let index = startIndex; index <= currentIndex; index += 1) {
+      const strength = analysis.frames[index]?.onset ?? 0;
+      const previous = analysis.frames[index - 1]?.onset ?? 0;
+      const next = analysis.frames[index + 1]?.onset ?? 0;
+      if (strength >= 0.16 && strength >= previous && strength > next) events.push(index);
+    }
+
+    const context = this.context;
+    const maximumRadius = safeGraphRadius(this.layout);
+    context.save();
+    context.globalCompositeOperation = "screen";
+    for (const eventIndex of events.slice(-2)) {
+      const eventFrame = analysis.frames[eventIndex];
+      if (!eventFrame) continue;
+      const age = Math.max(0, time - eventIndex / analysis.fps);
+      const progress = clamp(age / lifetime);
+      const random = createRandom(deriveSeed(this.seed, `prism:${eventIndex}`));
+      let dominantBand = 0;
+      for (let index = 1; index < eventFrame.spectrum.length; index += 1) {
+        if ((eventFrame.spectrum[index] ?? 0) > (eventFrame.spectrum[dominantBand] ?? 0)) {
+          dominantBand = index;
+        }
+      }
+      const dominantRatio = dominantBand / Math.max(1, eventFrame.spectrum.length - 1);
+      const strength = eventFrame.onset * Math.exp(-age / 0.28);
+      const alphaLimit = this.config.visual.lowFlash ? 0.18 : 0.28;
+      for (let streak = 0; streak < 6; streak += 1) {
+        const baseAngle = dominantRatio * Math.PI * 2 - Math.PI;
+        const direction = baseAngle + age * randomBetween(random, -0.85, 0.85);
+        const seededDirection = direction + randomBetween(random, -0.62, 0.62);
+        const orbit = maximumRadius * randomBetween(random, 0.12, 0.38) * (0.5 + progress);
+        const length =
+          maximumRadius * randomBetween(random, 0.22, 0.52) * (1 - progress * 0.55);
+        const bend = randomBetween(random, -0.32, 0.32) * maximumRadius;
+        const startX = this.layout.centerX + Math.cos(seededDirection) * orbit;
+        const startY =
+          this.layout.horizon +
+          Math.sin(seededDirection) * orbit * randomBetween(random, 0.42, 0.72);
+        const endX = startX + Math.cos(seededDirection) * length;
+        const endY = startY + Math.sin(seededDirection) * length * 0.56;
+        const normalX = -Math.sin(seededDirection) * bend;
+        const normalY = Math.cos(seededDirection) * bend * 0.5;
+        const hue =
+          this.palettePhase + dominantRatio * 320 + streak * 41 + age * 46;
+        const alpha =
+          strength *
+          (1 - progress) *
+          alphaLimit *
+          (0.72 + visual.peak * 0.45) *
+          this.config.visual.intensity;
+        context.strokeStyle = hsla(hue, 100, 74, alpha);
+        context.lineWidth = Math.max(
+          0.55,
+          this.width * 0.0011 * randomBetween(random, 0.45, 1.3),
+        );
+        context.beginPath();
+        context.moveTo(startX, startY);
+        context.bezierCurveTo(
+          startX + (endX - startX) * 0.32 + normalX,
+          startY + (endY - startY) * 0.32 + normalY,
+          startX + (endX - startX) * 0.72 + normalX * 0.35,
+          startY + (endY - startY) * 0.72 + normalY * 0.35,
+          endX,
+          endY,
+        );
+        context.stroke();
+      }
+    }
+    context.restore();
+  }
+
   private drawBeatEchoes(analysis: AudioAnalysis, time: number): void {
     const context = this.context;
     const lifetime = 0.72;
     const currentIndex = Math.min(
       analysis.frames.length - 1,
-      Math.max(0, Math.floor(time * analysis.fps)),
+      Math.max(0, Math.round(time * analysis.fps)),
     );
     const startIndex = Math.max(1, currentIndex - Math.ceil(lifetime * analysis.fps));
     const events: number[] = [];
@@ -544,17 +683,27 @@ export class VisualizerRenderer {
     frame: AnalysisFrame,
     previous: AnalysisFrame,
     time: number,
+    visual: VisualState,
   ): void {
     const context = this.context;
     const maximumRadius = safeGraphRadius(this.layout);
     const baseRadius = maximumRadius * (0.5 + frame.bass * 0.1);
-    const rotation = time * (0.018 + frame.mid * 0.035);
+    const rotation =
+      time * 0.038 + frame.mid * 0.11 + visual.motion * 0.12 + visual.trend * 0.18;
+    const haloPresence =
+      (0.42 + visual.ambient * 0.52 + visual.peak * 0.14 + (1 - visual.chapter) * 0.18) *
+      (1 - visual.form * 0.52);
 
     context.save();
     context.globalCompositeOperation = "screen";
     const contours = [
-      { values: previous.spectrum, alpha: 0.045, scale: 0.94, hue: -28 },
-      { values: frame.spectrum, alpha: 0.11 + frame.rms * 0.06, scale: 1, hue: 0 },
+      { values: previous.spectrum, alpha: 0.04 * haloPresence, scale: 0.94, hue: -28 },
+      {
+        values: frame.spectrum,
+        alpha: (0.095 + frame.rms * 0.055) * haloPresence,
+        scale: 1,
+        hue: 0,
+      },
     ];
     for (const contour of contours) {
       context.beginPath();
@@ -595,7 +744,12 @@ export class VisualizerRenderer {
       const innerRadius = baseRadius * 0.86;
       const outerRadius = baseRadius + energy * maximumRadius * 0.22;
       const hue = this.palettePhase + time * 5 + (index / frame.spectrum.length) * 320;
-      context.strokeStyle = hsla(hue, 98, 72, 0.035 + energy * 0.13);
+      context.strokeStyle = hsla(
+        hue,
+        98,
+        72,
+        (0.028 + energy * 0.115) * haloPresence,
+      );
       context.lineWidth = Math.max(0.5, this.width / 2600);
       context.beginPath();
       context.moveTo(
@@ -615,17 +769,32 @@ export class VisualizerRenderer {
     analysis: AudioAnalysis,
     frame: AnalysisFrame,
     time: number,
+    visual: VisualState,
   ): void {
     const context = this.context;
     const bands = frame.spectrum.length;
     const maxHeight = this.layout.horizon - this.layout.graphTop;
+    const layerCount = 7;
+    const travel = time * 0.2;
+    const layers = Array.from({ length: layerCount }, (_, lane) => ({
+      lane,
+      depth: wrap(travel + lane / layerCount),
+    })).sort((left, right) => left.depth - right.depth);
 
     context.save();
     context.globalCompositeOperation = "screen";
-    for (let depth = 5; depth >= 1; depth -= 1) {
-      const historical = frameAt(analysis, Math.max(0, time - depth * 0.065));
-      const scale = 1 + depth * 0.025 + frame.onset * 0.05;
-      const alpha = (1 - depth / 6) ** 2 * (0.025 + frame.rms * 0.07);
+    for (const layer of layers) {
+      const rawDepth = layer.depth;
+      const depth = rawDepth ** 1.55;
+      const visibility =
+        smoothstep(0, 0.1, rawDepth) * (1 - smoothstep(0.8, 1, rawDepth));
+      const historical = frameAt(analysis, Math.max(0, time - (1 - depth) * 0.52));
+      const scale = 0.68 + depth * 0.7 + visual.beat * 0.045;
+      const alpha =
+        (0.012 + depth ** 2 * 0.085) *
+        (0.44 + visual.drive * 0.58 + visual.peak * 0.23 + visual.chapter * 0.28) *
+        (0.72 + frame.rms * 0.38) *
+        visibility;
       context.beginPath();
       for (let point = 0; point <= bands * 2; point += 1) {
         const progress = point / (bands * 2);
@@ -636,8 +805,11 @@ export class VisualizerRenderer {
         const x = this.layout.centerX + (baseX - this.layout.centerX) * scale;
         const y =
           this.layout.horizon -
-          energy * maxHeight * (0.38 + depth * 0.035) +
-          Math.sin(time * 0.35 + depth * 1.1) * this.layout.height * 0.004 * frame.mid;
+          energy * maxHeight * (0.32 + depth * 0.46) * scale +
+          Math.sin(time * 0.42 + layer.lane * 1.1) *
+            this.layout.height *
+            0.004 *
+            frame.mid;
         if (point === 0) context.moveTo(x, y);
         else context.lineTo(x, y);
       }
@@ -648,7 +820,8 @@ export class VisualizerRenderer {
         const energy = historical.spectrum[spectrumIndex] ?? 0;
         const baseX = this.layout.left + this.layout.width * progress;
         const x = this.layout.centerX + (baseX - this.layout.centerX) * scale;
-        const y = this.layout.horizon + energy * maxHeight * (0.3 + depth * 0.025);
+        const y =
+          this.layout.horizon + energy * maxHeight * (0.27 + depth * 0.38) * scale;
         context.lineTo(x, y);
       }
       context.closePath();
@@ -660,15 +833,115 @@ export class VisualizerRenderer {
         this.layout.horizon,
         time,
         alpha,
-        -depth * 18,
+        -layer.lane * 24 + depth * 46,
         58,
       );
       context.fill();
+      context.strokeStyle = this.rainbowGradient(
+        context,
+        this.layout.left,
+        this.layout.horizon,
+        this.layout.right,
+        this.layout.horizon,
+        time,
+        alpha * (0.72 + depth * 0.5),
+        26 - layer.lane * 21,
+        72,
+      );
+      context.lineWidth = Math.max(0.5, this.width / 2800) * (0.65 + depth);
+      context.stroke();
     }
     context.restore();
   }
 
-  private drawSpectrum(frame: AnalysisFrame, time: number): void {
+  private drawOrbitalWaveform(
+    frame: AnalysisFrame,
+    previous: AnalysisFrame,
+    time: number,
+    visual: VisualState,
+  ): void {
+    const context = this.context;
+    const maximumRadius = safeGraphRadius(this.layout);
+    const radiusX =
+      Math.min(this.layout.width * 0.36, maximumRadius * 3.1) *
+      (0.84 + frame.bass * 0.12 + visual.beat * 0.04);
+    const radiusY = maximumRadius * (0.88 + frame.mid * 0.09 + visual.beat * 0.035);
+    const morph = smoothstep(0.08, 0.86, visual.form);
+    const rotation = time * 0.11 + visual.motion * 0.18 + visual.trend * 0.2;
+    const contours = [
+      { waveform: previous.waveform, alpha: 0.052, scale: 0.94, hue: -42 },
+      {
+        waveform: frame.waveform,
+        alpha:
+          0.13 +
+          visual.peak * 0.09 +
+          visual.beat * 0.055 +
+          visual.chapter * 0.09,
+        scale: 1,
+        hue: 16,
+      },
+    ];
+
+    context.save();
+    context.globalCompositeOperation = "screen";
+    for (const contour of contours) {
+      context.beginPath();
+      for (let index = 0; index <= contour.waveform.length; index += 1) {
+        const waveformIndex = index % contour.waveform.length;
+        const progress = index / contour.waveform.length;
+        const angle = progress * Math.PI * 2 + rotation;
+        const rawSample = contour.waveform[waveformIndex] ?? 0;
+        const seamDistance = Math.min(progress, 1 - progress);
+        const seamMix = smoothstep(0, 0.075, seamDistance);
+        const seamSample =
+          ((contour.waveform[0] ?? 0) +
+            (contour.waveform[contour.waveform.length - 1] ?? 0)) /
+          2;
+        const sample = lerp(seamSample, rawSample, seamMix);
+        const deformation =
+          contour.scale *
+          (1 + sample * (0.075 + frame.rms * 0.035) + frame.treble * 0.015);
+        const ellipseX = Math.cos(angle) * radiusX * deformation;
+        const ellipseY = Math.sin(angle) * radiusY * deformation;
+        const figureEightX = Math.sin(angle) * radiusX * deformation;
+        const figureEightY = Math.sin(angle * 2) * radiusY * deformation * 0.92;
+        const x = this.layout.centerX + lerp(ellipseX, figureEightX, morph);
+        const y =
+          this.layout.horizon +
+          lerp(ellipseY, figureEightY, morph) +
+          sample * maximumRadius * 0.055;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+      context.closePath();
+      context.strokeStyle = this.rainbowGradient(
+        context,
+        this.layout.centerX - radiusX,
+        this.layout.horizon,
+        this.layout.centerX + radiusX,
+        this.layout.horizon,
+        time,
+        contour.alpha *
+          (0.45 + visual.form * 1.35 + visual.drive * 0.2 + visual.peak * 0.25),
+        contour.hue,
+        74,
+      );
+      context.lineWidth =
+        Math.max(1.1, this.width / 1100) *
+        (contour.scale < 1 ? 0.72 : 1 + visual.beat * 0.8);
+      context.shadowColor = hsla(
+        this.palettePhase + time * 5 + contour.hue,
+        100,
+        72,
+        contour.alpha * 0.85,
+      );
+      context.shadowBlur = this.width * 0.004 * (0.55 + visual.peak);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  private drawSpectrum(frame: AnalysisFrame, time: number, visual: VisualState): void {
     const context = this.context;
     const margin = this.layout.left;
     const usableWidth = this.layout.width;
@@ -676,6 +949,8 @@ export class VisualizerRenderer {
     const maxHeight = horizon - this.layout.graphTop;
     const bands = frame.spectrum.length;
     const pulse = this.config.visual.lowFlash ? Math.min(frame.onset, 0.32) : frame.onset;
+    const presence =
+      (0.5 + visual.drive * 0.42 + visual.peak * 0.34) * (1 - visual.form * 0.62);
 
     context.save();
     context.globalCompositeOperation = "screen";
@@ -710,7 +985,7 @@ export class VisualizerRenderer {
       margin + usableWidth,
       horizon,
       time,
-      0.13 + pulse * 0.16,
+      (0.11 + pulse * 0.14) * presence,
       0,
       62,
     );
@@ -723,7 +998,7 @@ export class VisualizerRenderer {
       margin + usableWidth,
       horizon,
       time,
-      0.32 + frame.rms * 0.24 + pulse * 0.18,
+      (0.28 + frame.rms * 0.21 + pulse * 0.17) * presence,
       18,
       70,
     );
@@ -737,7 +1012,7 @@ export class VisualizerRenderer {
       const x = margin + (index + 0.5) * barWidth;
       const height = energy * (this.layout.graphBottom - horizon) * 0.58;
       const hue = this.palettePhase + time * 5 + (index / Math.max(1, bands - 1)) * 320;
-      context.strokeStyle = hsla(hue, 96, 68, 0.08 + energy * 0.22);
+      context.strokeStyle = hsla(hue, 96, 68, (0.065 + energy * 0.2) * presence);
       context.beginPath();
       context.moveTo(x, this.layout.graphBottom);
       context.lineTo(x, this.layout.graphBottom - height);
@@ -950,10 +1225,12 @@ export class VisualizerRenderer {
     }
 
     if (this.config.visual.grain > 0) {
-      const grain = this.grainCanvases[frameIndex % this.grainCanvases.length];
+      const grainCadence = Math.max(1, Math.round(this.config.output.fps / 12));
+      const grain =
+        this.grainCanvases[Math.floor(frameIndex / grainCadence) % this.grainCanvases.length];
       if (grain) {
         context.save();
-        context.globalAlpha = this.config.visual.grain * (0.72 + frame.treble * 0.5);
+        context.globalAlpha = this.config.visual.grain * (0.68 + frame.treble * 0.36);
         context.globalCompositeOperation = "overlay";
         context.imageSmoothingEnabled = false;
         context.drawImage(grain, 0, 0, this.width, this.height);
