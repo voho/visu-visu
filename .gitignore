@@ -1,0 +1,8 @@
+node_modules/
+dist/
+renders/
+*.mp4
+*.webm
+*.mov
+*.analysis.json
+.DS_Store

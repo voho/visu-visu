@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "output": {
+    "width": 1920,
+    "height": 1280,
+    "fps": 30,
+    "crf": 18,
+    "preset": "medium"
+  },
+  "text": {
+    "title": "",
+    "artist": ""
+  },
+  "visual": {
+    "seed": "auto",
+    "intensity": 1,
+    "bokehCount": 48,
+    "spectrumBands": 64,
+    "grain": 0.035,
+    "vignette": 0.28,
+    "lowFlash": true
+  }
+}

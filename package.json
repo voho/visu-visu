@@ -1,0 +1,31 @@
+{
+  "name": "visu-visu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic, audio-reactive music video renderer",
+  "bin": {
+    "visu-visu": "./src/cli.ts"
+  },
+  "scripts": {
+    "analyze": "bun src/cli.ts analyze",
+    "render": "bun src/cli.ts render",
+    "preview": "bun src/cli.ts render --duration 8 --size 960x640 --quality preview",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun test"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.3.0",
+    "node": ">=24.0.0"
+  },
+  "packageManager": "bun@1.3.14"
+}
