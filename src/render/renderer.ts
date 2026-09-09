@@ -5,6 +5,8 @@ import { deriveMusicMotion, type MusicMotion } from "./music-motion.js";
 import { novaEventsAt, type SupernovaEvent } from "./supernova.js";
 import { FrozenCloudLayer } from "./frozen-cloud-layer.js";
 import { drawArtwork, deriveArtworkMotion, type PreparedArtwork } from "./artwork.js";
+import { ArtworkInfluence } from "./artwork-influence.js";
+import { createArtworkWarpField } from "./artwork-warp.js";
 import { createMaterial, recolorMaterial, type MaterialMap, type MaterialSample } from "./material.js";
 import { lightingAt, shadeSurface, type Rgb } from "./lighting.js";
 import { paletteCss, paletteRgb, randomPalette, type ScenePalette } from "./palette.js";
@@ -13,7 +15,7 @@ import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface } from "./surface-mesh.js";
 import { deriveSceneDynamics, type SceneDynamics } from "./scene-dynamics.js";
 import { SceneAtmosphere } from "./scene-atmosphere.js";
-import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraAt } from "./scene-optics.js";
+import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraMatrix } from "./scene-optics.js";
 import { audioFieldAt, audioFieldGeometry, drawAudioField } from "./audio-field.js";
 import { deriveMusicEffects, type MusicEffects, frequencyResponse } from "./music-effects.js";
 import {
@@ -148,6 +150,7 @@ export class VisualizerRenderer {
   private readonly materialLight: MaterialLightLayer;
   private readonly artworkLight: MaterialLightLayer | undefined;
   private readonly sceneAtmosphere: SceneAtmosphere;
+  private readonly artworkInfluence = new ArtworkInfluence();
   private backgroundCacheKey = "";
   private backgroundCacheAnalysis: AudioAnalysis | undefined;
 
@@ -498,13 +501,23 @@ export class VisualizerRenderer {
     output.restore();
     // Emission already uses the hero camera. Keep bloom registered to its
     // source geometry instead of applying the atmosphere's separate drift.
-    if (this.artwork) drawArtwork(output, this.artwork, time, motion);
+    const artworkWarp = this.artwork ? this.artworkInfluence.at(analysis, time, (captureTime) => {
+      const captureFrame = frameAt(analysis, captureTime);
+      const captureDynamics = deriveSceneDynamics(analysis, captureTime);
+      const captureMotion = inertialMusicMotion(deriveMusicMotion(analysis, captureTime), captureDynamics);
+      const shape = createResonanceFilaments(this.resonancePlan, captureFrame,
+        deriveVisualState(analysis, captureTime), this.layout, captureTime, this.config.visual.lowFlash, captureMotion);
+      return createArtworkWarpField(shape, this.width, this.height, this.layout,
+        sceneCameraMatrix(this.layout, captureDynamics, this.palettePhase * 0.01, this.ribbonPlan.direction),
+        0.35 + captureDynamics.cloud.energy * 0.45 + captureDynamics.body.energy * 0.20);
+    }) : undefined;
+    if (this.artwork) drawArtwork(output, this.artwork, time, motion, artworkWarp);
     const lightingStrength = this.config.visual.lighting ?? 0.65;
     const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette);
     this.sceneAtmosphere.draw(output, dynamics, lights);
     if (lightingStrength > 0) {
       this.materialLight.draw(output, lights, lightingStrength);
-      this.artworkLight?.draw(output, lights, lightingStrength, deriveArtworkMotion(time, motion).zoom);
+      this.artworkLight?.draw(output, lights, lightingStrength, deriveArtworkMotion(time, motion).zoom, artworkWarp);
     }
     this.frozenClouds.draw(output, analysis, time, (context, captureTime) => {
       const frozenFrame = frameAt(analysis, captureTime);
@@ -828,16 +841,8 @@ export class VisualizerRenderer {
     context: SKRSContext2D,
     dynamics: SceneDynamics,
   ): void {
-    const pose = sceneCameraAt(dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction);
-    const halfY = Math.min(this.layout.horizon - this.layout.graphTop, this.layout.graphBottom - this.layout.horizon);
-
-    context.translate(
-      this.layout.centerX + pose.x * this.layout.width / 2,
-      this.layout.horizon + pose.y * halfY,
-    );
-    context.rotate(pose.roll);
-    context.scale(pose.zoom, pose.zoom);
-    context.translate(-this.layout.centerX, -this.layout.horizon);
+    const matrix = sceneCameraMatrix(this.layout, dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction);
+    context.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
   }
 
   private drawResonance(

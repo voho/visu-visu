@@ -192,7 +192,7 @@ void main() {
  float wave=texture2D(uFeatures,vec2(featureX,0.75)).r*2.0-1.0;
  float slope=texture2D(uFeatures,vec2(min(0.984,featureX+0.03125),0.25)).r-spectrum;
  vec3 normal=normalize(geometric*bump.z+tangent*(bump.x*0.42-slope*0.14)+bitangent*bump.y*0.42);
- vec3 color=lighting(normal,rawAlbedo,roughness);
+ vec3 color=uView< -0.5?vec3(1.0):lighting(normal,rawAlbedo,roughness);
  float graph=0.30+spectrum*(1.0-featureX*0.78)*(0.22+uMotion.x*0.16);
  float osc=0.72+wave*(0.05+uMotion.x*0.11);
  float spectrumLine=exp(-abs(vUv.y-graph)*140.0);
@@ -211,7 +211,7 @@ void main() {
   gl_FragColor=vec4(color*0.8,alpha*smoothstep(0.312,0.358,gl_FragCoord.y/uResolution.y));
  } else {
   float tracer=pow(max(0.0,sin(vUv.x*TAU*2.0-uDynamics[2].y*1.35+vUv.y*TAU)),28.0);
-  vec3 tint=mix(uLightColor[0],uLightColor[1],0.5+sin(vUv.y*TAU+uClock.x*0.15)*0.5);
+  vec3 tint=uView< -0.5?vec3(1.0):mix(uLightColor[0],uLightColor[1],0.5+sin(vUv.y*TAU+uClock.x*0.15)*0.5);
   float light=0.32+vEnergy*0.24+tracer*(0.25+uMotion.z*0.55);
   color=mix(color,tint,0.64)*light;
   gl_FragColor=vec4(color,0.50*coverage*smoothstep(0.312,0.358,gl_FragCoord.y/uResolution.y));

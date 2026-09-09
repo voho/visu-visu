@@ -30,6 +30,17 @@ export function sceneCameraAt(dynamics: SceneDynamics, phase = 0, direction = 1)
   };
 }
 
+/** The same projection is used by visible geometry and its background influence. */
+export function sceneCameraMatrix(layout: SafeLayout, dynamics: SceneDynamics, phase = 0, direction = 1) {
+  const pose = sceneCameraAt(dynamics, phase, direction);
+  const halfY = Math.min(layout.horizon - layout.graphTop, layout.graphBottom - layout.horizon);
+  const a = Math.cos(pose.roll) * pose.zoom, b = Math.sin(pose.roll) * pose.zoom;
+  const c = -b, d = a;
+  return { a, b, c, d,
+    e: layout.centerX + pose.x * layout.width / 2 - a * layout.centerX - c * layout.horizon,
+    f: layout.horizon + pose.y * halfY - b * layout.centerX - d * layout.horizon };
+}
+
 /**
  * Optical copies of the low-resolution light field, never of the finished frame.
  * Broad bloom and rotating zoom smears leave the photo skin and credits sharp.

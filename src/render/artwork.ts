@@ -7,6 +7,11 @@ import { createSafeLayout } from "./layout.js";
 import { extractPalette, rgbHue, type ScenePalette } from "./palette.js";
 import type { MusicMotion } from "./music-motion.js";
 import { createMaterialFromRgba, type MaterialMap } from "./material.js";
+import { ArtworkWarp, type ArtworkWarpField } from "./artwork-warp.js";
+
+// Cache by the actual source canvas, including replacement canvases used when
+// isolating the object texture. A copied PreparedArtwork cannot revive a cover.
+const artworkWarps = new WeakMap<Canvas, ArtworkWarp>();
 
 export interface PreparedArtwork {
   /** Low-resolution, softened and masked texture; no per-frame image decoding. */
@@ -171,6 +176,7 @@ export async function prepareArtwork(
   for (let index = 3; index < material.albedo.length; index += 4) {
     material.albedo[index] = protectedPixels[index]!;
   }
+  artworkWarps.set(canvas, new ArtworkWarp(canvas));
   return { canvas, width, height, ...colors, material, objectMaterial };
 }
 
@@ -180,6 +186,7 @@ export function drawArtwork(
   artwork: PreparedArtwork,
   time: number,
   music?: MusicMotion,
+  warpField?: ArtworkWarpField,
 ): void {
   const motion = deriveArtworkMotion(time, music);
   const width = artwork.width * motion.zoom;
@@ -188,6 +195,12 @@ export function drawArtwork(
   context.globalCompositeOperation = "screen";
   context.globalAlpha = motion.opacity;
   context.filter = `saturate(${motion.saturation})`;
-  context.drawImage(artwork.canvas, (artwork.width - width) / 2, (artwork.height - height) / 2, width, height);
+  let canvas = artwork.canvas;
+  if (warpField) {
+    let warp = artworkWarps.get(canvas);
+    if (!warp) { warp = new ArtworkWarp(canvas); artworkWarps.set(canvas, warp); }
+    canvas = warp.render(warpField, motion.zoom);
+  }
+  context.drawImage(canvas, (artwork.width - width) / 2, (artwork.height - height) / 2, width, height);
   context.restore();
 }

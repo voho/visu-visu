@@ -4,8 +4,10 @@ export interface AudioFieldSpoke {
   energy: number; phase: number; front: boolean;
 }
 export interface AudioFieldGeometry {
+  /** 32 gently blended bands, mirrored into 64 stems. */
   spokes: AudioFieldSpoke[];
   halos: Array<{ points: AudioFieldPoint[]; alpha: number; width: number; phase: number }>;
+  /** Bounded cubic interpolation of the signed source, with fixed tapered ends. */
   wave: AudioFieldPoint[];
   waveAlpha: number;
 }

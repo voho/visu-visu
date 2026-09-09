@@ -18,6 +18,7 @@ import { previewCamera } from "../src/preview/lighting-camera.js";
 import { deriveSceneDynamics } from "../src/render/scene-dynamics.js";
 import { deriveMusicMotion } from "../src/render/music-motion.js";
 import { lightingAt } from "../src/render/lighting.js";
+import { lensingSamples } from "../src/preview/lighting-lensing.js";
 
 let directory: string;
 let audioPath: string;
@@ -219,6 +220,30 @@ describe("live lighting preview", () => {
       expect(camera.x).toBeGreaterThan(0.485);
       expect(camera.x).toBeLessThan(0.515);
     }
+  });
+
+  test("cover lens brackets stay causal and fit their bounded geometry atlas", () => {
+    expect(lensingSamples(0)).toEqual([
+      { a: 0, b: 0, blend: 0, weight: 0.5 },
+      { a: 0, b: 0, blend: 0, weight: 0.32 },
+      { a: 0, b: 0, blend: 0, weight: 0.18 },
+    ]);
+    for (const time of [0.01, 0.35, 0.70, 1.15, 3.05, 29.9, 107.967]) {
+      const samples = lensingSamples(time);
+      expect(samples.reduce((sum, sample) => sum + sample.weight, 0)).toBeCloseTo(1, 10);
+      const ids = new Set([Math.floor(time * 10)]);
+      for (const sample of samples) {
+        expect(sample.a / 10).toBeLessThanOrEqual(time);
+        expect(sample.b / 10).toBeLessThanOrEqual(time);
+        expect(sample.blend).toBeGreaterThanOrEqual(0);
+        expect(sample.blend).toBeLessThanOrEqual(1);
+        ids.add(sample.a); ids.add(sample.b);
+      }
+      expect(new Set([...ids].map(id => id % 16)).size).toBe(ids.size);
+    }
+    const beforeSeek = lensingSamples(29.9);
+    lensingSamples(107.967);
+    expect(lensingSamples(29.9)).toEqual(beforeSeek);
   });
 });
 

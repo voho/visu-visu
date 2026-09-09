@@ -4,6 +4,7 @@ import { createAudioField } from '/lighting-audio-field.js';
 import { previewCamera } from '/lighting-camera.js';
 import { createSculptureGlow } from '/lighting-glow.js';
 import { createDepthParticles } from '/lighting-particles.js';
+import { createSculptureLensing } from '/lighting-lensing.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -33,6 +34,7 @@ uniform sampler2D uRoughness;
 uniform sampler2D uArtwork;
 uniform sampler2D uFeatures;
 uniform sampler2D uPalette;
+uniform sampler2D uLensing;
 uniform float uHasArtwork;
 uniform float uArtworkAspect;
 uniform float uView;
@@ -84,7 +86,16 @@ void main() {
   p/=1.0+bodyEnergy*0.030+impactEnergy*0.014;
   vec3 background = texture2D(uPalette,vec2(fract(driftClock*0.035+cloudEnergy*0.12),0.5)).rgb*0.042;
   if (uHasArtwork > 0.5) {
-    vec2 cover = uv - 0.5;
+    // The field comes from actual delayed sculpture silhouettes, never an
+    // unrelated noise/audio deformation. Normal and color samples share this UV.
+    vec2 fieldStep=vec2(smallSide*0.018)/uResolution;
+    vec2 gradient=vec2(
+      texture2D(uLensing,uv+vec2(fieldStep.x,0.0)).r-texture2D(uLensing,uv-vec2(fieldStep.x,0.0)).r,
+      texture2D(uLensing,uv+vec2(0.0,fieldStep.y)).r-texture2D(uLensing,uv-vec2(0.0,fieldStep.y)).r);
+    vec2 influence=(-gradient+vec2(-gradient.y,gradient.x)*0.25)/(0.035+length(gradient)*1.04);
+    float anchor=smoothstep(0.0,0.12,uv.x)*smoothstep(0.0,0.12,1.0-uv.x)
+      *smoothstep(0.0,0.12,1.0-uv.y)*smoothstep(0.30,0.48,uv.y);
+    vec2 cover=uv-0.5+influence*anchor*(6.5*smallSide/1080.0)/uResolution;
     if (aspect > uArtworkAspect) cover.y *= uArtworkAspect / aspect;
     else cover.x *= aspect / uArtworkAspect;
     cover=rotation(sin(driftClock*0.22)*0.022)*cover;
@@ -315,6 +326,7 @@ async function start() {
   status.textContent = 'Ready · WebGL';
   const values = new Float32Array(profile.stride);
   const frozenValues = new Float32Array(profile.stride);
+  const lensValues = new Float32Array(profile.stride);
   function sampleTimeline(time, output) {
     const samplePosition = Math.max(0, Math.min(profile.frameCount - 1, time * profile.fps));
     const frame = Math.floor(samplePosition), next = Math.min(frame + 1, profile.frameCount - 1);
@@ -335,6 +347,10 @@ async function start() {
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, stripTexture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, strip);
   }
+  const lensing=profile.hasArtwork?createSculptureLensing(gl,(captureTime,width,height)=>{
+    sampleTimeline(captureTime,lensValues);uploadSignals(lensValues);
+    drawSculpture(lensValues,width,height,-1);
+  }):null;
   const history = createFrozenHistory(gl, profile.ghosts, (captureTime, width, height) => {
     sampleTimeline(captureTime, frozenValues);
     uploadSignals(frozenValues);
@@ -352,7 +368,7 @@ async function start() {
   let lastSize = '';
   let fps = 0;
   // Exposes only diagnostic counters; source paths and audio data stay on the server.
-  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0, ghostPixelHash: id => history.pixelHash(id), palette: { source: palette.source, colors: palette.colors } };
+  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0, ghostPixelHash: id => history.pixelHash(id), lensPixelStats:()=>lensing?.pixelStats(), palette: { source: palette.source, colors: palette.colors } };
   function draw(now) {
     const time = Math.max(0, Math.min(profile.duration, audio.currentTime || 0));
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -377,6 +393,7 @@ async function start() {
       }
       sampleTimeline(time, values);
       history.update(time, width, height, mode === 0);
+      lensing?.update(time,width,height);
       // Capturing history temporarily uploads old FFT/material light data.
       // Restore the live textures and drawing state before painting this frame.
       uploadSignals(values);
@@ -402,6 +419,7 @@ async function start() {
       gl.uniform3fv(uniform('uLightColor[0]'), colors);
       gl.uniform2fv(uniform('uLightPower[0]'), powers);
       gl.uniform1f(uniform('uView'), mode);
+      lensing?.bind();gl.uniform1i(uniform('uLensing'),6);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       if(mode===0){glow.draw(values,width,height);drawParticles(values,width,height,false);}
       if (mode === 0) { audioField.update(values, width, height); audioField.draw(false); }
@@ -422,7 +440,7 @@ async function start() {
     }
     seek.value = String(time);
     document.querySelector('#elapsed').textContent = clock(time);
-    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time) });
+    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time), lensing:lensing?.inspect() });
     if (!gl.isContextLost()) requestAnimationFrame(draw);
   }
   play.addEventListener('click', async () => {

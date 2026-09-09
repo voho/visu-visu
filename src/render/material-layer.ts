@@ -3,6 +3,7 @@ import { smoothstep } from "../math/random.js";
 import { sampleMaterial, type MaterialMap, type MaterialSample } from "./material.js";
 import { shadeSurface, type LightingState, type Rgb } from "./lighting.js";
 import type { SafeLayout } from "./layout.js";
+import { warpArtworkPixels, type ArtworkWarpField } from "./artwork-warp.js";
 
 /** Low-resolution diffuse texture light, underneath the sharp sculpture/text. */
 export class MaterialLightLayer {
@@ -11,6 +12,7 @@ export class MaterialLightLayer {
   private readonly masks: Float32Array;
   private readonly positions: Float32Array;
   private readonly creditBottom: number;
+  private readonly warpedPixels: Uint8ClampedArray;
 
   constructor(
     private readonly width: number,
@@ -24,6 +26,7 @@ export class MaterialLightLayer {
     const w = Math.max(24, Math.round(width * scale));
     const h = Math.max(24, Math.round(height * scale));
     this.canvas = createCanvas(w, h);
+    this.warpedPixels = new Uint8ClampedArray(w * h * 4);
     this.masks = new Float32Array(w * h);
     this.positions = new Float32Array(w * h * 2);
     this.samples = Array.from({ length: w * h }, (_, index) => {
@@ -40,7 +43,7 @@ export class MaterialLightLayer {
     });
   }
 
-  draw(output: SKRSContext2D, lights: LightingState, strength: number, zoom = 1): void {
+  draw(output: SKRSContext2D, lights: LightingState, strength: number, zoom = 1, artworkWarp?: ArtworkWarpField): void {
     if (!Number.isFinite(strength) || !(strength > 0)) return;
     strength = Math.min(1, strength);
     if (!Number.isFinite(zoom) || zoom <= 0) zoom = 1;
@@ -57,6 +60,9 @@ export class MaterialLightLayer {
       image.data[at + 1] = Math.round(Math.sqrt(rgb[1]) * 255);
       image.data[at + 2] = Math.round(Math.sqrt(rgb[2]) * 255);
       image.data[at + 3] = Math.round(255 * this.masks[index]! * sample.a * strength * (this.artwork ? 0.17 : 0.1));
+    }
+    if (this.artwork && artworkWarp) {
+      image.data.set(warpArtworkPixels(image.data, this.canvas.width, this.canvas.height, artworkWarp, this.warpedPixels, zoom));
     }
     context.putImageData(image, 0, 0);
     output.save();

@@ -1,5 +1,5 @@
 export const ANALYSIS_VERSION = 2;
-export const RENDERER_VERSION = 17;
+export const RENDERER_VERSION = 18;
 
 export interface OutputConfig {
   width: number;

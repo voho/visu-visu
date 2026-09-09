@@ -255,6 +255,7 @@ async function main(): Promise<void> {
     ["/lighting-camera.js", resolve(import.meta.dir, "lighting-camera.js")],
     ["/lighting-glow.js", resolve(import.meta.dir, "lighting-glow.js")],
     ["/lighting-particles.js", resolve(import.meta.dir, "lighting-particles.js")],
+    ["/lighting-lensing.js", resolve(import.meta.dir, "lighting-lensing.js")],
     ["/audio-field-geometry.js", resolve(import.meta.dir, "../render/audio-field-geometry.js")],
     ["/audio", options.audioPath],
     ["/albedo.png", resolve(import.meta.dir, "../../assets/materials/silk-albedo.png")],

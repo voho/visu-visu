@@ -13,20 +13,31 @@ export interface AudioFieldState {
   /** Separate causal frequency envelopes for the visible spectrum crown. */
   spectrum: Float32Array;
 }
-interface Profile { fps: number; count: number; targets: Float64Array; starts: Float64Array }
+interface Profile { fps: number; count: number; targets: Float64Array; starts: Float64Array; smoothed: Float64Array }
 const profiles = new WeakMap<AudioAnalysis, Profile>();
 const STRIDE = AUDIO_FIELD_BANDS + 2;
 const unit = (value: number): number => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-function advance(start: number, target: number, elapsed: number, channel: number): number {
-  const attack = channel === 0 ? 0.020 : channel === 1 ? 0.28 : 0.022;
+function advance(start: number, smoothed: number, target: number, elapsed: number, channel: number): { envelope: number; value: number } {
+  const attack = channel === 0 ? 0.020 : channel === 1 ? 0.28 : 0.032;
   const release = channel === 0 ? 0.20 : channel === 1 ? 1.2 : 0.40 - (channel - 2) / 31 * 0.28;
-  return target + (start - target) * Math.exp(-elapsed / (target > start ? attack : release));
+  const response = target > start ? attack : release;
+  const decay = Math.exp(-elapsed / response);
+  const envelope = target + (start - target) * decay;
+  if (channel < 2) return { envelope, value: envelope };
+  // A second short pole eases velocity at every FFT boundary while keeping
+  // hits crisp. Exact integration preserves the same curve at any frame rate.
+  const inertia = 0.022;
+  const inertiaDecay = Math.exp(-elapsed / inertia);
+  const value = target + (smoothed - target) * inertiaDecay
+    + (start - target) * response / (response - inertia) * (decay - inertiaDecay);
+  return { envelope, value: unit(value) };
 }
 function build(analysis: AudioAnalysis): Profile {
   const fps = Number.isFinite(analysis.fps) && analysis.fps > 0 ? analysis.fps : 30;
   const count = analysis.frames.length;
   const targets = new Float64Array(count * STRIDE);
   const starts = new Float64Array(targets.length);
+  const smoothed = new Float64Array(targets.length);
   for (let index = 0; index < count; index++) {
     const frame = analysis.frames[index]!;
     const offset = index * STRIDE;
@@ -34,10 +45,13 @@ function build(analysis: AudioAnalysis): Profile {
     const features = surfaceFeatureSamples(frame);
     for (let band = 0; band < AUDIO_FIELD_BANDS; band++) targets[offset + 2 + band] = unit(features[band]!);
     if (index > 0) for (let channel = 0; channel < STRIDE; channel++) {
-      starts[offset + channel] = advance(starts[offset - STRIDE + channel]!, targets[offset - STRIDE + channel]!, 1 / fps, channel);
+      const previous = offset - STRIDE + channel;
+      const next = advance(starts[previous]!, smoothed[previous]!, targets[previous]!, 1 / fps, channel);
+      starts[offset + channel] = next.envelope;
+      smoothed[offset + channel] = next.value;
     }
   }
-  return { fps, count, starts, targets };
+  return { fps, count, starts, smoothed, targets };
 }
 
 /** Absolute-time envelopes: seeking cannot borrow future audio or previous rendered frames. */
@@ -51,12 +65,15 @@ export function audioFieldAt(analysis: AudioAnalysis, time: number): AudioFieldS
   if (index > 0 && index / profile.fps > safeTime) index--;
   if (index + 1 < profile.count && (index + 1) / profile.fps <= safeTime) index++;
   const elapsed = safeTime - index / profile.fps;
-  const at = (channel: number): number => advance(profile!.starts[index * STRIDE + channel]!, profile!.targets[index * STRIDE + channel]!, elapsed, channel);
+  const at = (channel: number): number => {
+    const offset = index * STRIDE + channel;
+    return advance(profile!.starts[offset]!, profile!.smoothed[offset]!, profile!.targets[offset]!, elapsed, channel).value;
+  };
   for (let band = 0; band < AUDIO_FIELD_BANDS; band++) spectrum[band] = at(band + 2);
   return { fast: at(0), slow: at(1), spectrum };
 }
 
-/** Thin spectral stems and a signed waveform orbit frame the textured sculpture. */
+/** Rounded spectral stems and a smooth signed waveform frame the textured sculpture. */
 export function drawAudioField(
   context: SKRSContext2D,
   layout: SafeLayout,
@@ -68,10 +85,11 @@ export function drawAudioField(
   const radius = safeGraphRadius(layout);
   const rx = Math.min(layout.width * 0.40, radius * 1.55);
   const ry = radius * 0.78;
-  const width = Math.max(0.65, radius * 0.0038);
+  const width = Math.max(1.2, radius * 0.0076);
   context.save();
   context.globalCompositeOperation = "screen";
   context.lineCap = "round";
+  context.lineJoin = "round";
   const path = (points: AudioFieldPoint[]): void => {
     context.beginPath();
     let joined = false;
