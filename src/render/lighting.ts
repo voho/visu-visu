@@ -42,6 +42,7 @@ export interface SurfaceSample {
   ny: number;
   nz: number;
   roughness: number;
+  pigment?: "artwork" | "palette";
 }
 
 function bounded(value: number, min = 0, max = 1, fallback = 0): number {
@@ -187,9 +188,10 @@ export function shadeSurface(
   // Scalar reflectance keeps palette-colored pigment/light multiplication from
   // inventing new hues. Source lighting supplies chroma; relief keeps its detail.
   const reflectance = bounded(sample.r) * 0.2126 + bounded(sample.g) * 0.7152 + bounded(sample.b) * 0.0722;
-  const albedoR = state.palette ? reflectance : bounded(sample.r);
-  const albedoG = state.palette ? reflectance : bounded(sample.g);
-  const albedoB = state.palette ? reflectance : bounded(sample.b);
+  const artwork = sample.pigment === "artwork";
+  const albedoR = state.palette && !artwork ? reflectance : bounded(sample.r);
+  const albedoG = state.palette && !artwork ? reflectance : bounded(sample.g);
+  const albedoB = state.palette && !artwork ? reflectance : bounded(sample.b);
   const roughness = bounded(sample.roughness, 0.08, 1, 0.65);
   const exponent = 4 + (1 - roughness) ** 2 * 92;
   const gloss = 0.15 + (1 - roughness) * 0.45;
@@ -198,9 +200,11 @@ export function shadeSurface(
   const vy = -y / viewLength;
   const vz = (3.4 - z) / viewLength;
   const ndotv = Math.max(0, nx * vx + ny * vy + nz * vz);
-  let r = albedoR * bounded(state.ambient[0], 0, 2);
-  let g = albedoG * bounded(state.ambient[1], 0, 2);
-  let b = albedoB * bounded(state.ambient[2], 0, 2);
+  const ambientLuma = 0.16 + bounded(state.ambient[0], 0, 2) * 0.2126
+    + bounded(state.ambient[1], 0, 2) * 0.7152 + bounded(state.ambient[2], 0, 2) * 0.0722;
+  let r = albedoR * (artwork ? ambientLuma : bounded(state.ambient[0], 0, 2));
+  let g = albedoG * (artwork ? ambientLuma : bounded(state.ambient[1], 0, 2));
+  let b = albedoB * (artwork ? ambientLuma : bounded(state.ambient[2], 0, 2));
 
   for (const light of state.lights) {
     const dx = bounded(light.position[0], -100, 100) - x;
@@ -226,9 +230,18 @@ export function shadeSurface(
       / (1 + distanceSquared * bounded(light.falloff, 0, 4));
     const diffuse = ndotl * 0.88;
     const shine = (specular + rim) * ndotl;
-    r += (albedoR * diffuse + shine) * bounded(light.color[0]) * attenuation;
-    g += (albedoG * diffuse + shine) * bounded(light.color[1]) * attenuation;
-    b += (albedoB * diffuse + shine) * bounded(light.color[2]) * attenuation;
+    if (artwork) {
+      // Neutral diffuse illumination keeps actual photo pigment recognizable;
+      // colored specular and FFT reflections still come from the cover palette.
+      const lightLuma = bounded(light.color[0]) * 0.2126 + bounded(light.color[1]) * 0.7152 + bounded(light.color[2]) * 0.0722;
+      r += (albedoR * diffuse * lightLuma + shine * bounded(light.color[0])) * attenuation;
+      g += (albedoG * diffuse * lightLuma + shine * bounded(light.color[1])) * attenuation;
+      b += (albedoB * diffuse * lightLuma + shine * bounded(light.color[2])) * attenuation;
+    } else {
+      r += (albedoR * diffuse + shine) * bounded(light.color[0]) * attenuation;
+      g += (albedoG * diffuse + shine) * bounded(light.color[1]) * attenuation;
+      b += (albedoB * diffuse + shine) * bounded(light.color[2]) * attenuation;
+    }
   }
 
   const strip = state.spectrum;
@@ -253,17 +266,18 @@ export function shadeSurface(
       * (0.28 + (1 - roughness) * 0.4 + fresnel * 0.45);
     const keyColor = state.lights[0].color;
     const rimColor = state.lights[2].color;
-    r += amount * (bounded(keyColor[0]) * (1 - frequency) + bounded(rimColor[0]) * frequency) * (albedoR * 0.35 + 0.65);
-    g += amount * (bounded(keyColor[1]) * (1 - frequency) + bounded(rimColor[1]) * frequency) * (albedoG * 0.35 + 0.65);
-    b += amount * (bounded(keyColor[2]) * (1 - frequency) + bounded(rimColor[2]) * frequency) * (albedoB * 0.35 + 0.65);
+    r += amount * (bounded(keyColor[0]) * (1 - frequency) + bounded(rimColor[0]) * frequency) * ((artwork ? reflectance : albedoR) * 0.35 + 0.65);
+    g += amount * (bounded(keyColor[1]) * (1 - frequency) + bounded(rimColor[1]) * frequency) * ((artwork ? reflectance : albedoG) * 0.35 + 0.65);
+    b += amount * (bounded(keyColor[2]) * (1 - frequency) + bounded(rimColor[2]) * frequency) * ((artwork ? reflectance : albedoB) * 0.35 + 0.65);
   }
 
   const exposure = bounded(state.exposure, 0, 4, 1);
   r *= exposure;
   g *= exposure;
   b *= exposure;
-  out[0] = r / (1 + r);
-  out[1] = g / (1 + g);
-  out[2] = b / (1 + b);
+  const photoDenominator = 1 + Math.max(r, g, b);
+  out[0] = r / (artwork ? photoDenominator : 1 + r);
+  out[1] = g / (artwork ? photoDenominator : 1 + g);
+  out[2] = b / (artwork ? photoDenominator : 1 + b);
   return out;
 }

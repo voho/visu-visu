@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { drawArtwork, prepareArtwork, deriveArtworkMotion } from "../src/render/artwork.js";
 import type { MusicMotion } from "../src/render/music-motion.js";
+import { sampleMaterial } from "../src/render/material.js";
 
 let directory: string;
 beforeAll(async () => { directory = await mkdtemp(join(tmpdir(), "visu-visu-artwork-")); });
@@ -114,6 +115,41 @@ describe("artwork preparation", () => {
     expect(swatches).toContainEqual([216, 50, 143]);
     expect(swatches).toContainEqual([31, 175, 96]);
     expect(swatches).toContainEqual([221, 221, 221]);
+  });
+
+  test("keeps the complete image pigment and alpha on the object, separate from background masks", async () => {
+    const source = createCanvas(64, 64);
+    const context = source.getContext("2d");
+    context.fillStyle = "#f05331";
+    context.fillRect(0, 0, 32, 64);
+    context.fillStyle = "#3c87b9";
+    context.fillRect(32, 0, 32, 64);
+    context.fillStyle = "white";
+    context.fillRect(16, 8, 32, 12);
+    context.clearRect(24, 42, 16, 12);
+    const sourcePixels = context.getImageData(0, 0, 64, 64).data;
+    const path = join(directory, "object-photo.png");
+    await writeFile(path, source.toBuffer("image/png"));
+    const landscape = (await prepareArtwork(path, 640, 360))!;
+    const portrait = (await prepareArtwork(path, 360, 640))!;
+    const object = landscape.objectMaterial!;
+    expect(object.pigment).toBe("artwork");
+    expect(object.width).toBe(64);
+    expect(object.height).toBe(64);
+    expect(object.albedo).toEqual(sourcePixels);
+    expect(portrait.objectMaterial!.albedo).toEqual(object.albedo);
+    expect(portrait.objectMaterial!.normals).toEqual(object.normals);
+    const objectCreditPosition = sampleMaterial(object, 0.5, 0.22);
+    const backgroundCreditPosition = sampleMaterial(landscape.material!, 0.5, 0.22);
+    expect(objectCreditPosition.a).toBe(1);
+    expect(objectCreditPosition.r).toBe(1);
+    expect(backgroundCreditPosition.a).toBeLessThan(0.05);
+    expect(sampleMaterial(object, 0.5, 0.75).a).toBe(0);
+    for (let index = 0; index < object.normals.length; index += 3) {
+      expect(Math.hypot(object.normals[index]!, object.normals[index + 1]!, object.normals[index + 2]!)).toBeCloseTo(1, 6);
+    }
+    expect(Math.min(...object.roughness)).toBeGreaterThanOrEqual(0.5);
+    expect(Math.max(...object.roughness)).toBeLessThanOrEqual(0.74);
   });
 
   test("adds a feathered artwork vignette independently of the scene", async () => {

@@ -13,6 +13,7 @@ import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface } from "./surface-mesh.js";
 import { deriveSceneDynamics } from "./scene-dynamics.js";
 import { SceneAtmosphere } from "./scene-atmosphere.js";
+import { audioFieldAt, audioFieldGeometry, drawAudioField } from "./audio-field.js";
 import { deriveMusicEffects, type MusicEffects, frequencyResponse } from "./music-effects.js";
 import {
   clamp,
@@ -172,8 +173,9 @@ export class VisualizerRenderer {
     this.palettePhase = this.palette.anchorHue;
     this.layout = createSafeLayout(this.width, this.height);
     this.frozenClouds = new FrozenCloudLayer(this.width, this.height, this.layout, this.seed);
-    this.material = recolorMaterial(createMaterial(seed), this.palette);
-    this.materialLight = new MaterialLightLayer(this.width, this.height, this.material, this.layout);
+    const atmosphereMaterial = recolorMaterial(createMaterial(seed), this.palette);
+    this.material = artwork?.objectMaterial ?? atmosphereMaterial;
+    this.materialLight = new MaterialLightLayer(this.width, this.height, atmosphereMaterial, this.layout);
     this.sceneAtmosphere = new SceneAtmosphere(this.width, this.height, this.layout, seed, config.visual.lowFlash);
     this.artworkLight = artwork?.material
       ? new MaterialLightLayer(this.width, this.height, artwork.material, this.layout, true)
@@ -336,6 +338,8 @@ export class VisualizerRenderer {
       novas,
     );
     const dynamics = deriveSceneDynamics(analysis, time);
+    const signal = audioFieldAt(analysis, time);
+    const audioField = audioFieldGeometry(signal.spectrum, frame.waveform, signal.fast, signal.slow, dynamics.drift.clock);
     this.drawStardust(frame, visual, dynamics.cloud.clock);
     this.drawDepthGlints(frame, dynamics.detail.clock * 2.4, visual, choreography);
 
@@ -350,6 +354,7 @@ export class VisualizerRenderer {
     );
     context.clip();
     this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    drawAudioField(context, this.layout, audioField, this.palette, false, this.config.visual.lowFlash);
     drawMaterialSurface(context, filaments, frame, motion, this.material,
       lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette),
       this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
@@ -360,6 +365,7 @@ export class VisualizerRenderer {
     this.drawRibbonMesh(context, ribbon, visual, choreography, time, "back");
     context.restore();
     this.drawResonance(context, filaments, frame, visual, time, false, "front", motion, effects);
+    drawAudioField(context, this.layout, audioField, this.palette, true, this.config.visual.lowFlash);
     this.drawFastOrbiters(frame, { ...motion, fastTime: dynamics.spark.clock }, effects);
     context.save();
     context.globalAlpha = 0.055;

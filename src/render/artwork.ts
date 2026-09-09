@@ -19,6 +19,8 @@ export interface PreparedArtwork {
   palette: ScenePalette;
   /** Luminance-derived shallow relief, with the same quiet-area masks. */
   material?: MaterialMap;
+  /** Full, uncropped cover pigment and relief for the moving object itself. */
+  objectMaterial?: MaterialMap;
 }
 
 export interface ArtworkMotion {
@@ -87,7 +89,22 @@ export async function prepareArtwork(
   const paletteCanvas = createCanvas(Math.max(1, Math.round(source.width * paletteScale)), Math.max(1, Math.round(source.height * paletteScale)));
   const paletteContext = paletteCanvas.getContext("2d");
   paletteContext.drawImage(source, 0, 0, paletteCanvas.width, paletteCanvas.height);
-  const palette = extractPalette(paletteContext.getImageData(0, 0, paletteCanvas.width, paletteCanvas.height).data);
+  const palettePixels = paletteContext.getImageData(0, 0, paletteCanvas.width, paletteCanvas.height).data;
+  const palette = extractPalette(palettePixels);
+  // The object receives the complete image before background contrast changes,
+  // aspect cropping, vignette or credit/hero masks. Tiny dimensions are expanded
+  // only to satisfy finite-difference normal sampling.
+  const objectCanvas = createCanvas(Math.max(2, paletteCanvas.width), Math.max(2, paletteCanvas.height));
+  const objectContext = objectCanvas.getContext("2d");
+  objectContext.drawImage(source, 0, 0, objectCanvas.width, objectCanvas.height);
+  const objectMaterial = createMaterialFromRgba(
+    objectContext.getImageData(0, 0, objectCanvas.width, objectCanvas.height).data,
+    objectCanvas.width, objectCanvas.height,
+    { blurRadius: Math.max(1, Math.round(Math.min(objectCanvas.width, objectCanvas.height) * 0.008)), strength: 0.035 },
+  );
+  for (let index = 0; index < objectMaterial.roughness.length; index += 1) {
+    objectMaterial.roughness[index] = clamp(0.68 - objectMaterial.heightMap[index]! * 0.14, 0.5, 0.74);
+  }
   const colors = {
     palette, accentHue: palette.anchorHue,
     secondaryHue: rgbHue(palette.colors[1] ?? palette.colors[0] ?? [0.5, 0.5, 0.5]),
@@ -154,7 +171,7 @@ export async function prepareArtwork(
   for (let index = 3; index < material.albedo.length; index += 4) {
     material.albedo[index] = protectedPixels[index]!;
   }
-  return { canvas, width, height, ...colors, material };
+  return { canvas, width, height, ...colors, material, objectMaterial };
 }
 
 /** Slow breathing plus a 1.2% bass impulse zoom; opacity never follows a beat. */

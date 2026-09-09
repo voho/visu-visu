@@ -34,3 +34,6 @@ export type * from "./types.js";
 
 export { extractPalette, randomPalette, paletteRgb, paletteCss } from "./render/palette.js";
 export type { ScenePalette } from "./render/palette.js";
+
+export { audioFieldAt, audioFieldGeometry } from "./render/audio-field.js";
+export type { AudioFieldState } from "./render/audio-field.js";

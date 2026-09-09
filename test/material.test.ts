@@ -118,6 +118,24 @@ describe("cover relief", () => {
     expect(sampleMaterial(map, 1, 0.4).a).toBe(0);
   });
 
+  test("samples photographic pigment with alpha-aware interpolation and clears reused photo mode", () => {
+    const map = createMaterialFromRgba(new Uint8ClampedArray([
+      255, 30, 0, 255, 0, 255, 255, 0,
+      255, 30, 0, 255, 0, 255, 255, 0,
+    ]), 2, 2);
+    const sample = sampleMaterial(map, 0.5, 0.5);
+    expect(sample.a).toBe(0.5);
+    expect(sample.r).toBe(1);
+    expect(sample.g).toBeCloseTo(30 / 255, 8);
+    expect(sample.b).toBe(0);
+    expect(sample.pigment).toBe("artwork");
+    sampleMaterial(createMaterial("reuse", 2), 0.5, 0.5, sample);
+    expect(sample.pigment).toBeUndefined();
+    const transparent = sampleMaterial(map, 1, 0.5);
+    expect(transparent.a).toBe(0);
+    expect(transparent.r + transparent.g + transparent.b).toBe(0);
+  });
+
   test("softens high-frequency cover details before deriving relief", () => {
     const pixels = new Uint8ClampedArray(32 * 32 * 4);
     for (let index = 0; index < 32 * 32; index += 1) {

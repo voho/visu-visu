@@ -1,7 +1,7 @@
 // The live sculpture follows the same toroidal flow, morph clocks, and bass-first
 // geometry as render/resonance.ts. The GPU shades its translucent material skin
 // and the original-style luminous filaments as one coherent object.
-export function createSculpture(gl) {
+export function createSculpture(gl, hasArtwork = false) {
   const vertexFeatures = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) > 0;
   const vertex = `
 precision highp float;
@@ -98,6 +98,8 @@ uniform sampler2D uRoughness;
 uniform sampler2D uFeatures;
 uniform sampler2D uStrip;
 uniform sampler2D uPalette;
+uniform sampler2D uArtwork;
+uniform float uHasArtwork;
 uniform vec3 uStripState;
 uniform float uPass;
 uniform float uView;
@@ -109,12 +111,15 @@ varying vec2 vUv;
 varying float vEnergy;
 const float TAU=6.28318530718;
 vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
- albedo=vec3(dot(albedo,vec3(0.2126,0.7152,0.0722)));
+ const vec3 luma=vec3(0.2126,0.7152,0.0722);
+ if(uHasArtwork<0.5) albedo=vec3(dot(albedo,luma));
  vec3 view=normalize(vec3(0.0,0.0,3.4)-vPosition);
  float nv=max(dot(normal,view),0.0);
  float exponent=4.0+pow(1.0-roughness,2.0)*92.0;
  float gloss=0.15+(1.0-roughness)*0.45;
- vec3 color=albedo*uAmbient;
+ // Photographic pigment keeps its own RGB under neutral diffuse light. The
+ // source-palette specular reflections still move over that attached image.
+ vec3 color=albedo*(uHasArtwork>0.5?vec3(0.16+dot(uAmbient,luma)):uAmbient);
  for(int i=0;i<3;i++) {
   vec3 delta=uLightPosition[i]-vPosition;
   float dd=max(dot(delta,delta),0.00001);
@@ -124,8 +129,9 @@ vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
   float fresnel=0.06+0.94*pow(1.0-clamp(dot(view,halfway),0.0,1.0),5.0);
   float specular=pow(max(dot(normal,halfway),0.0),exponent)*gloss*(0.25+fresnel*2.0);
   float rim=pow(1.0-nv,3.0)*0.045*(1.0-roughness*0.6);
-  color+=uLightColor[i]*uLightPower[i].x/(1.0+dd*uLightPower[i].y)
-    *(albedo*0.88*nl+(specular+rim)*nl);
+  vec3 diffuseLight=uHasArtwork>0.5?vec3(dot(uLightColor[i],luma)):uLightColor[i];
+  color+=uLightPower[i].x/(1.0+dd*uLightPower[i].y)
+    *(diffuseLight*albedo*0.88*nl+uLightColor[i]*(specular+rim)*nl);
  }
  // The FFT itself is an environment strip light. Normal-map relief changes
  // reflected direction, selecting another frequency/color from the same strip.
@@ -141,13 +147,22 @@ vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
   float gate=exp(-reflected.y*reflected.y/(0.022+roughness*roughness*0.48+(1.0-coordinate)*0.06));
   float fresnel=0.16+0.84*pow(1.0-nv,5.0);
   float amount=radiance*gate*uStripState.z*(0.28+(1.0-roughness)*0.4+fresnel*0.45);
-  color+=amount*mix(uLightColor[0],uLightColor[2],coordinate)*(albedo*0.35+0.65);
+  vec3 reflectionPigment=uHasArtwork>0.5?vec3(dot(albedo,luma)):albedo;
+  color+=amount*mix(uLightColor[0],uLightColor[2],coordinate)*(reflectionPigment*0.35+0.65);
  }
  color*=uExposure;
+ if(uHasArtwork>0.5) {
+  color/=1.0+max(color.r,max(color.g,color.b));
+  return color*inversesqrt(max(0.01,dot(color,luma)));
+ }
  return sqrt(color/(vec3(1.0)+color));
 }
 void main() {
  vec2 uv=vUv*vec2(2.0,1.0)+vec2(uClock.x*0.006,0.0);
+ // Mirror each closed axis to keep the full picture attached to the sculpture
+ // without cropped borders, moving UVs, or an abrupt repeating image seam.
+ vec2 mirrorDirection=vec2(1.0)-step(vec2(0.5),fract(vUv))*2.0;
+ if(uHasArtwork>0.5) uv=1.0-abs(fract(vUv)*2.0-1.0);
  vec3 rawAlbedo=texture2D(uAlbedo,uv).rgb;
  float materialDetail=dot(rawAlbedo,vec3(0.2126,0.7152,0.0722));
  vec3 pigment=texture2D(uPalette,vec2(fract(vUv.y+uClock.x*0.009),0.5)).rgb;
@@ -155,6 +170,15 @@ void main() {
  // exclusively from this image's palette, including neutral monochrome images.
  vec3 albedo=mix(vec3(1.0),pigment,0.78)*(0.35+materialDetail*0.80);
  vec3 bump=normalize(texture2D(uNormal,uv).rgb*2.0-1.0);
+ float coverage=1.0;
+ if(uHasArtwork>0.5) {
+  vec4 photo=texture2D(uArtwork,uv);
+  coverage=photo.a;
+  rawAlbedo=photo.a>0.00001?photo.rgb/photo.a:vec3(0.0);
+  albedo=rawAlbedo;
+  vec2 seamDistance=min(fract(vUv),min(abs(fract(vUv)-0.5),1.0-fract(vUv)));
+  bump.xy*=mirrorDirection*smoothstep(vec2(0.0),vec2(0.018),seamDistance);
+ }
  float roughness=clamp(texture2D(uRoughness,uv).r,0.08,1.0);
  vec3 geometric=normalize(vNormal);
  if(!gl_FrontFacing) geometric=-geometric;
@@ -176,18 +200,19 @@ void main() {
   if(uView<1.5) color=albedo;
   else if(uView<2.5) color=bump*0.5+0.5;
   else color=vec3(roughness);
-  gl_FragColor=vec4(color,1.0);return;
+  if(coverage<0.01)discard;
+  gl_FragColor=vec4(color,coverage);return;
  }
  if(uPass<0.5) {
   float facing=abs(dot(normal,normalize(vec3(0.0,0.0,3.4)-vPosition)));
-  float alpha=(0.20+pow(1.0-facing,2.0)*0.19)*(0.7+vEnergy*0.3);
+  float alpha=((uHasArtwork>0.5?0.44:0.20)+pow(1.0-facing,2.0)*0.19)*(0.7+vEnergy*0.3)*coverage;
   gl_FragColor=vec4(color*0.8,alpha);
  } else {
   float tracer=pow(max(0.0,sin(vUv.x*TAU*2.0-uDynamics[2].y*1.35+vUv.y*TAU)),28.0);
   vec3 tint=mix(uLightColor[0],uLightColor[1],0.5+sin(vUv.y*TAU+uClock.x*0.15)*0.5);
   float light=0.32+vEnergy*0.24+tracer*(0.25+uMotion.z*0.55);
   color=mix(color,tint,0.64)*light;
-  gl_FragColor=vec4(color,0.50);
+  gl_FragColor=vec4(color,0.50*coverage);
  }
 }
 `;
@@ -220,7 +245,8 @@ void main() {
   const surfaceBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,surfaceBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
   const lineBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(lines),gl.STATIC_DRAW);
   const attribute=gl.getAttribLocation(program,'aParameter');
-  for(const [name,unit]of[['uAlbedo',0],['uNormal',1],['uRoughness',2],['uFeatures',4],['uStrip',5],['uPalette',7]])gl.uniform1i(uniform(name),unit);
+  for(const [name,unit]of[['uAlbedo',0],['uNormal',1],['uRoughness',2],['uArtwork',3],['uFeatures',4],['uStrip',5],['uPalette',7]])gl.uniform1i(uniform(name),unit);
+  gl.uniform1f(uniform('uHasArtwork'),hasArtwork?1:0);
   const positions=new Float32Array(9),colors=new Float32Array(9),powers=new Float32Array(6);
   return (values,width,height,mode)=>{
     gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,parameterBuffer);gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,2,gl.FLOAT,false,0,0);

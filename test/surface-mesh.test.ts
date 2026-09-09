@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { createSafeLayout } from "../src/render/layout.js";
 import { lightingAt } from "../src/render/lighting.js";
-import { createMaterial } from "../src/render/material.js";
+import { createMaterial, createMaterialFromRgba, type MaterialMap } from "../src/render/material.js";
 import { createResonanceFilaments, createResonancePlan } from "../src/render/resonance.js";
 import { drawMaterialSurface } from "../src/render/surface-mesh.js";
 import type { AnalysisFrame } from "../src/types.js";
@@ -27,7 +27,7 @@ const filaments = createResonanceFilaments(createResonancePlan("mesh-test"), fra
 const material = createMaterial("mesh-test", 32);
 const lights = lightingAt(motion, 5, "mesh-test", 210);
 
-function render(audio: AnalysisFrame, strength = 0.65): Uint8ClampedArray {
+function render(audio: AnalysisFrame, strength = 0.65, surface: MaterialMap = material): Uint8ClampedArray {
   const canvas = createCanvas(width, height);
   const context = canvas.getContext("2d");
   context.fillStyle = "rgb(8,12,16)";
@@ -36,7 +36,7 @@ function render(audio: AnalysisFrame, strength = 0.65): Uint8ClampedArray {
   context.beginPath();
   context.rect(layout.left, layout.graphTop, layout.width, layout.graphBottom - layout.graphTop);
   context.clip();
-  drawMaterialSurface(context, filaments, audio, motion, material, lights, strength, false);
+  drawMaterialSurface(context, filaments, audio, motion, surface, lights, strength, false);
   return context.getImageData(0, 0, width, height).data;
 }
 
@@ -66,6 +66,19 @@ describe("audio-reflecting material mesh", () => {
     // The material, geometry and lights are reused above. Only the arrays in
     // AnalysisFrame changed, so a global beat/color effect cannot satisfy this.
     expect(render(frame)).toEqual(baseline);
+  });
+
+  test("photographic alpha controls the actual skin, including light and waveform accents", () => {
+    const pixels = new Uint8ClampedArray(32 * 32 * 4);
+    for (let index = 0; index < pixels.length; index += 4) pixels.set([160, 70, 190, 255], index);
+    const opaque = createMaterialFromRgba(pixels, 32, 32);
+    for (let index = 3; index < pixels.length; index += 4) pixels[index] = 0;
+    const transparent = createMaterialFromRgba(pixels, 32, 32);
+    const active = { ...frame, spectrum: new Float32Array(64).fill(1),
+      waveform: Float32Array.from({ length: 192 }, (_, index) => Math.sin(index * 0.15)) };
+    const hidden = render(active, 1, transparent);
+    expect(hidden).toEqual(render(active, 0, opaque));
+    expect(pixelDifference(hidden, render(active, 1, opaque)).changedPixels).toBeGreaterThan(1000);
   });
 
   test("disabled lighting leaves output untouched and the filled material stays below credits", () => {

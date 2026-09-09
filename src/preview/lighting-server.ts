@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { createCanvas } from "@napi-rs/canvas";
 import { analyzeAudio } from "../audio/analyze.js";
 import { assertFfmpegAvailable, decodeAudio } from "../audio/decode.js";
 import { readAudioMetadata } from "../audio/metadata.js";
@@ -12,9 +13,11 @@ import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME, type FrozenCloud
 import type { AudioAnalysis } from "../types.js";
 import { prepareArtwork } from "../render/artwork.js";
 import { randomPalette, type ScenePalette } from "../render/palette.js";
+import type { MaterialMap } from "../render/material.js";
+import { audioFieldAt } from "../render/audio-field.js";
 
 export const LIGHTING_FEATURE_BANDS = SURFACE_FEATURE_BANDS;
-export const LIGHTING_TIMELINE_STRIDE = 36 + LIGHTING_FEATURE_BANDS * 3 + 3 + SCENE_LAYER_NAMES.length * 2;
+export const LIGHTING_TIMELINE_STRIDE = 36 + LIGHTING_FEATURE_BANDS * 4 + 5 + SCENE_LAYER_NAMES.length * 2;
 const HELP = `Live resonance preview\n\nUsage: bun run lighting:preview -- <song> [options]\n\n  --image <path>      Optional cover artwork\n  --title <text>      Track title (defaults to tags or filename)\n  --artist <text>     Artist credit (defaults to audio tags)\n  --port <number>     Local port (default: 4180)\n  --seed <text>       Deterministic lighting seed\n  --low-flash         Reduce fast light accents\n  --help             Show this help\n\nStarts a local WebGL sculpture with music-driven materials, filaments, and lights.\nUse render/clip to export the complete video scene as MP4.\n`;
 
 export interface LightingPreviewOptions {
@@ -88,6 +91,27 @@ export async function prepareLightingPalette(imagePath: string | undefined, seed
   return artwork?.palette ?? randomPalette(seed);
 }
 
+/** Data maps are made from the unmasked source image, never its darkened backdrop. */
+export function encodeLightingMaterialMaps(material: MaterialMap): ReadonlyMap<string, Uint8Array> {
+  const { width, height } = material;
+  const canvas = createCanvas(width, height);
+  const context = canvas.getContext("2d");
+  const pixels = context.createImageData(width, height);
+  const assets = new Map<string, Uint8Array>();
+  for (const kind of ["normal", "roughness"] as const) {
+    for (let index = 0; index < width * height; index += 1) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = kind === "normal" ? material.normals[index * 3 + channel]! * 0.5 + 0.5 : material.roughness[index]!;
+        pixels.data[index * 4 + channel] = Math.round(Math.max(0, Math.min(1, value)) * 255);
+      }
+      pixels.data[index * 4 + 3] = 255;
+    }
+    context.putImageData(pixels, 0, 0);
+    assets.set(`/object-${kind}.png`, canvas.toBuffer("image/png"));
+  }
+  return assets;
+}
+
 export function buildLightingTimeline(analysis: AudioAnalysis, seed: string, lowFlash = false, palette: ScenePalette = randomPalette(seed)): Float32Array {
   const output = new Float32Array(analysis.frames.length * LIGHTING_TIMELINE_STRIDE);
   for (let index = 0; index < analysis.frames.length; index += 1) {
@@ -119,6 +143,10 @@ export function buildLightingTimeline(analysis: AudioAnalysis, seed: string, low
       output[offset++] = dynamics[name].energy;
       output[offset++] = dynamics[name].clock;
     }
+    const field = audioFieldAt(analysis, time);
+    output[offset++] = field.fast;
+    output[offset++] = field.slow;
+    output.set(field.spectrum, offset);
   }
   return output;
 }
@@ -150,6 +178,7 @@ export function createLightingPreviewHandler(
   profile: LightingPreviewProfile,
   timeline: Float32Array,
   files: ReadonlyMap<string, string>,
+  assets: ReadonlyMap<string, Uint8Array> = new Map(),
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -169,6 +198,10 @@ export function createLightingPreviewHandler(
         headers: { ...RESPONSE_HEADERS, "Content-Type": "application/octet-stream", "Content-Length": String(timeline.byteLength) },
       });
     }
+    const asset = assets.get(url.pathname);
+    if (asset) return new Response(request.method === "HEAD" ? null : asset, {
+      headers: { ...RESPONSE_HEADERS, "Content-Type": "image/png", "Content-Length": String(asset.byteLength) },
+    });
     const path = files.get(url.pathname);
     if (!path) return new Response("Not found", { status: 404, headers: RESPONSE_HEADERS });
     const file = Bun.file(path);
@@ -205,13 +238,17 @@ async function main(): Promise<void> {
   const [pcm, tags] = await Promise.all([decodeAudio(options.audioPath), readAudioMetadata(options.audioPath)]);
   const analysis = analyzeAudio(pcm, 60, 64);
   const seed = options.seed ?? analysis.sourceHash.slice(0, 16);
-  const palette = await prepareLightingPalette(options.imagePath, seed);
+  const artwork = await prepareArtwork(options.imagePath, 1920, 1080);
+  const palette = artwork?.palette ?? randomPalette(seed);
+  const assets = artwork?.objectMaterial ? encodeLightingMaterialMaps(artwork.objectMaterial) : new Map<string, Uint8Array>();
   const timeline = buildLightingTimeline(analysis, seed, options.lowFlash, palette);
   const files = new Map<string, string>([
     ["/", resolve(import.meta.dir, "lighting.html")],
     ["/lighting.js", resolve(import.meta.dir, "lighting.js")],
     ["/lighting-mesh.js", resolve(import.meta.dir, "lighting-mesh.js")],
     ["/lighting-ghosts.js", resolve(import.meta.dir, "lighting-ghosts.js")],
+    ["/lighting-audio-field.js", resolve(import.meta.dir, "lighting-audio-field.js")],
+    ["/audio-field-geometry.js", resolve(import.meta.dir, "../render/audio-field-geometry.js")],
     ["/audio", options.audioPath],
     ["/albedo.png", resolve(import.meta.dir, "../../assets/materials/silk-albedo.png")],
     ["/normal.png", resolve(import.meta.dir, "../../assets/materials/silk-normal.png")],
@@ -225,7 +262,7 @@ async function main(): Promise<void> {
     fps: analysis.fps, frameCount: analysis.frames.length, stride: LIGHTING_TIMELINE_STRIDE,
     palette, hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
   };
-  const server = Bun.serve({ hostname: "127.0.0.1", port: options.port, fetch: createLightingPreviewHandler(profile, timeline, files) });
+  const server = Bun.serve({ hostname: "127.0.0.1", port: options.port, fetch: createLightingPreviewHandler(profile, timeline, files, assets) });
   console.log(`Live resonance preview: ${server.url}\n${profile.title}${profile.artist ? ` — ${profile.artist}` : ""}\nPress Ctrl+C to stop.`);
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { server.stop(true); process.exit(0); });
 }

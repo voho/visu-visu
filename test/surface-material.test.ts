@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createMaterialFromHeight, sampleMaterial, type MaterialMap } from "../src/render/material.js";
-import { sampleResonanceMaterial } from "../src/render/surface-material.js";
+import { createMaterialFromHeight, createMaterialFromRgba, sampleMaterial, type MaterialMap } from "../src/render/material.js";
+import { sampleResonanceMaterial, mirroredArtworkUv } from "../src/render/surface-material.js";
 import { createResonanceFilaments, createResonancePlan, type ResonanceFilament } from "../src/render/resonance.js";
 import { createSafeLayout } from "../src/render/layout.js";
 import type { AnalysisFrame } from "../src/types.js";
@@ -67,6 +67,34 @@ describe("filament material basis", () => {
     expect(sampleResonanceMaterial(map, filaments, 2, 2)).toEqual(sampleMaterial(map, 0, 0));
     filaments[2]!.points[3]!.surfaceX = NaN;
     expect(Object.values(sampleResonanceMaterial(map, filaments, 2, 2)).every(Number.isFinite)).toBe(true);
+  });
+
+  test("maps the full photo around both closed axes without a clamped half or moving UVs", () => {
+    for (const [phase, expected] of [[0, 0], [0.125, 0.25], [0.5, 1], [0.75, 0.5], [0.875, 0.25], [1, 0]] as const) {
+      expect(mirroredArtworkUv(phase).coordinate).toBeCloseTo(expected, 9);
+    }
+    expect(mirroredArtworkUv(0.25).normalSign).toBe(1);
+    expect(mirroredArtworkUv(0.75).normalSign).toBe(-1);
+    expect(mirroredArtworkUv(0).normalSign).toBe(0);
+    expect(mirroredArtworkUv(1 - 1e-8).coordinate).toBeCloseTo(mirroredArtworkUv(1e-8).coordinate, 6);
+    expect(Math.abs(mirroredArtworkUv(1 - 1e-8).normalSign)).toBeLessThan(1e-8);
+    const rgba = new Uint8ClampedArray(16 * 16 * 4);
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 0; x < 16; x += 1) rgba.set([x * 17, y * 17, 50, 255], (y * 16 + x) * 4);
+    }
+    const photo = createMaterialFromRgba(rgba, 16, 16);
+    const flat = plane();
+    const rotated = plane(true);
+    const a = sampleResonanceMaterial(photo, flat, 1.3, 2.5);
+    const b = sampleResonanceMaterial(photo, rotated, 1.3, 2.5);
+    expect([a.r, a.g, a.b, a.a, a.height]).toEqual([b.r, b.g, b.b, b.a, b.height]);
+    expect(Math.hypot(a.nx - b.nx, a.ny - b.ny, a.nz - b.nz)).toBeGreaterThan(0.1);
+    expect(sampleResonanceMaterial(photo, flat, 1.3, 2.5).r)
+      .toBeGreaterThan(sampleResonanceMaterial(photo, flat, 1.3, 3.5).r + 0.4);
+    for (const position of [0, 0.001, 1.99, 2, 2.01, 3.999]) {
+      const sample = sampleResonanceMaterial(photo, flat, 1.3, position);
+      expect(Math.hypot(sample.nx, sample.ny, sample.nz)).toBeCloseTo(1, 6);
+    }
   });
 
   test("real morphing geometry has finite unit normals independent of viewport and seek order", () => {

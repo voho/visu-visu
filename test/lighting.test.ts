@@ -221,3 +221,30 @@ test("artwork palette supplies every light and neutral artwork cannot acquire co
     }
   }
 });
+
+
+test("photo pigment remains spatial color under neutral diffuse lighting instead of collapsing to palette luminance", async () => {
+  const { extractPalette, rgbHue } = await import("../src/render/palette.js");
+  const palette = extractPalette(new Uint8ClampedArray([140, 140, 140, 255]));
+  const state = lightingAt({
+    slowTime: 0, fastTime: 0, bassPulse: 0, treblePulse: 0,
+    bassEnergy: 0, midEnergy: 0, trebleEnergy: 0, attack: 0, sustain: 0,
+  }, 0, "photo", 0, false, undefined, palette);
+  for (const light of state.lights) light.intensity = 0;
+  state.ambient = [0.1, 0.1, 0.1];
+  const red = { r: 1, g: 0, b: 0, nx: 0, ny: 0, nz: 1, roughness: 0.65, pigment: "artwork" as const };
+  const green = { ...red, r: 0, g: 0.2126 / 0.7152 };
+  // Both pigments have the same luminance. A scalar-only material would render
+  // identically, losing the source image's differently colored regions.
+  const r = shadeSurface(state, 0, 0, 0, red);
+  const g = shadeSurface(state, 0, 0, 0, green);
+  expect(r[0]).toBeGreaterThan(0.1);
+  expect(r[1] + r[2]).toBe(0);
+  expect(g[1]).toBeGreaterThan(0.05);
+  expect(g[0] + g[2]).toBe(0);
+  expect(rgbHue(r)).toBe(0);
+  expect(rgbHue(g)).toBe(120);
+  const redPalette = shadeSurface(state, 0, 0, 0, { ...red, pigment: "palette" });
+  const greenPalette = shadeSurface(state, 0, 0, 0, { ...green, pigment: "palette" });
+  expect(redPalette[0]).toBeCloseTo(greenPalette[0], 9);
+});

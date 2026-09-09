@@ -1,8 +1,19 @@
 import { sampleMaterial, type MaterialMap, type MaterialSample } from "./material.js";
+import { smoothstep } from "../math/random.js";
 import type { ResonanceFilament } from "./resonance.js";
 
-function cyclicIndex(value: number, count: number): number {
-  return Number.isFinite(value) ? ((Math.floor(value) % count) + count) % count : 0;
+function cyclicCoordinate(value: number, count: number): number {
+  return Number.isFinite(value) && count > 0 ? ((value % count) + count) % count : 0;
+}
+
+/** Full image out-and-back across a closed axis; no cropped or clamped half. */
+export function mirroredArtworkUv(position: number): { coordinate: number; normalSign: number } {
+  const phase = cyclicCoordinate(position, 1);
+  const edge = Math.min(phase, Math.abs(phase - 0.5), 1 - phase);
+  return {
+    coordinate: 1 - Math.abs(phase * 2 - 1),
+    normalSign: (phase < 0.5 ? 1 : -1) * smoothstep(0, 0.018, edge),
+  };
 }
 
 /** Transform the tangent-space texture normal onto the actual moving surface. */
@@ -14,12 +25,25 @@ export function sampleResonanceMaterial(
   out?: MaterialSample,
 ): MaterialSample {
   if (filaments.length === 0) return sampleMaterial(map, 0, 0, out);
-  strand = cyclicIndex(strand, filaments.length);
+  const strandPosition = cyclicCoordinate(strand, filaments.length);
+  strand = Math.floor(strandPosition);
   const points = filaments[strand]!.points;
   const count = points.length - 1;
   if (count < 2) return sampleMaterial(map, 0, strand / filaments.length * 2, out);
-  index = cyclicIndex(index, count);
-  const sample = sampleMaterial(map, index / count * 2, strand / filaments.length * 2, out);
+  const pointPosition = cyclicCoordinate(index, count);
+  index = Math.floor(pointPosition);
+  let sample: MaterialSample;
+  if (map.pigment === "artwork") {
+    const u = mirroredArtworkUv(pointPosition / count);
+    const v = mirroredArtworkUv(strandPosition / filaments.length);
+    sample = sampleMaterial(map, u.coordinate, v.coordinate, out);
+    sample.nx *= u.normalSign;
+    sample.ny *= v.normalSign;
+    const mirroredLength = Math.max(1e-8, Math.hypot(sample.nx, sample.ny, sample.nz));
+    sample.nx /= mirroredLength; sample.ny /= mirroredLength; sample.nz /= mirroredLength;
+  } else {
+    sample = sampleMaterial(map, pointPosition / count * 2, strandPosition / filaments.length * 2, out);
+  }
   const previous = points[(index - 1 + count) % count]!;
   const next = points[(index + 1) % count]!;
   const upper = filaments[(strand - 1 + filaments.length) % filaments.length]!.points[index];

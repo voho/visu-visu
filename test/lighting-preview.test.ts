@@ -2,16 +2,18 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { randomPalette } from "../src/render/palette.js";
 import {
-  buildLightingTimeline, buildLightingGhostSchedule, createLightingPreviewHandler, prepareLightingPalette, LIGHTING_TIMELINE_STRIDE,
+  buildLightingTimeline, buildLightingGhostSchedule, createLightingPreviewHandler, prepareLightingPalette, encodeLightingMaterialMaps, LIGHTING_TIMELINE_STRIDE,
   parseByteRange, parseLightingPreviewArgs,
 } from "../src/preview/lighting-server.js";
 import { analyzeAudio } from "../src/audio/analyze.js";
 import { surfaceFeatureSamples, sampleSurfaceFeature } from "../src/render/surface-signal.js";
 import type { AnalysisFrame } from "../src/types.js";
 import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
+import { prepareArtwork } from "../src/render/artwork.js";
+import { audioFieldAt } from "../src/render/audio-field.js";
 
 let directory: string;
 let audioPath: string;
@@ -117,6 +119,33 @@ describe("live lighting preview", () => {
     expect(warmResponse).not.toEqual(coolResponse);
   });
 
+  test("serves the original cover and its full-source relief maps without backdrop masking", async () => {
+    const path = join(directory, "warm.png");
+    const artwork = await prepareArtwork(path, 1920, 1080);
+    expect(artwork?.objectMaterial).toBeDefined();
+    const material = artwork!.objectMaterial!;
+    expect(material.albedo[3]).toBe(255);
+    expect(material.albedo.at(-1)).toBe(255);
+    const maps = encodeLightingMaterialMaps(material);
+    const handler = createLightingPreviewHandler({
+      title: "Track", artist: "Artist", duration: 1, fps: 60, frameCount: 1,
+      stride: LIGHTING_TIMELINE_STRIDE, hasArtwork: true, palette: artwork!.palette,
+    }, new Float32Array(LIGHTING_TIMELINE_STRIDE), new Map([["/artwork", path]]), maps);
+    const source = await handler(new Request("http://127.0.0.1/artwork"));
+    expect(new Uint8Array(await source.arrayBuffer())).toEqual(new Uint8Array(await Bun.file(path).arrayBuffer()));
+    for (const [route, bytes] of maps) {
+      const response = await handler(new Request(`http://localhost${route}`));
+      expect(response.headers.get("Content-Type")).toBe("image/png");
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(bytes));
+      const head = await handler(new Request(`http://localhost${route}`, { method: "HEAD" }));
+      expect(head.headers.get("Content-Length")).toBe(String(bytes.length));
+      expect(await head.text()).toBe("");
+      const image = await loadImage(new Uint8Array(bytes));
+      expect([image.width, image.height]).toEqual([material.width, material.height]);
+    }
+    expect((await handler(new Request("http://localhost/object-albedo.png"))).status).toBe(404);
+  });
+
   test("uniform timeline is deterministic, finite, and carries distinct animated light positions", () => {
     const samples = Float32Array.from({ length: 24_000 }, (_, index) => Math.sin(index / 24_000 * Math.PI * 2 * 65) * 0.5);
     const analysis = analyzeAudio({ samples, sampleRate: 24_000, duration: 1, sourceHash: "0".repeat(64), sourceFileHash: "0".repeat(64) }, 60, 64);
@@ -145,7 +174,12 @@ describe("live lighting preview", () => {
       });
     }
     expect(ghosts.envelope.at(-1)!.opacity).toBeLessThan(1e-10);
-    expect(timeline.length / 60).toBe(147);
+    expect(timeline.length / 60).toBe(181);
+    const field = audioFieldAt(analysis, 59 / 60);
+    const fieldOffset = 59 * LIGHTING_TIMELINE_STRIDE + 147;
+    expect(timeline[fieldOffset]!).toBeCloseTo(field.fast, 6);
+    expect(timeline[fieldOffset + 1]!).toBeCloseTo(field.slow, 6);
+    expect(Array.from(timeline.slice(fieldOffset + 2, fieldOffset + 34))).toEqual(Array.from(field.spectrum));
     for (let layer = 0; layer < 6; layer += 1) {
       const energy = timeline[59 * LIGHTING_TIMELINE_STRIDE + 135 + layer * 2]!;
       expect(energy).toBeGreaterThanOrEqual(0);

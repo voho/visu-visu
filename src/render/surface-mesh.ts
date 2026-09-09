@@ -32,14 +32,18 @@ export function drawMaterialSurface(
   if (!(strength > 0) || filaments.length < 2) return;
   const count = (filaments[0]?.points.length ?? 1) - 1;
   if (count < 4) return;
+  const artwork = material.pigment === "artwork";
+  const rowStep = artwork ? 1 : 2;
+  const pointStep = artwork ? 2 : 3;
   const samples = surfaceFeatureSamples(frame);
   const faces: Face[] = [];
-  // 72×240 source topology becomes 36×80 quads; cost does not grow with Full HD.
-  for (let strand = 0; strand < filaments.length; strand += 2) {
+  // Keep photo detail at 72×120 samples; procedural silk needs only 36×80.
+  // Both reuse actual source vertices, independently of Full HD delivery size.
+  for (let strand = 0; strand < filaments.length; strand += rowStep) {
     const row = filaments[strand]!.points;
-    const next = filaments[(strand + 2) % filaments.length]!.points;
-    for (let index = 0; index < count; index += 3) {
-      const end = Math.min(count, index + 3);
+    const next = filaments[(strand + rowStep) % filaments.length]!.points;
+    for (let index = 0; index < count; index += pointStep) {
+      const end = Math.min(count, index + pointStep);
       const a = row[index]!, b = row[end]!, c = next[end]!, d = next[index]!;
       if (!a || !b || !c || !d) continue;
       faces.push({ points: [a, b, c, d], strand, index,
@@ -63,7 +67,10 @@ export function drawMaterialSurface(
     const wave = sampleSurfaceFeature(samples, "waveform", wavePosition);
     const waveSlope = sampleSurfaceFeature(samples, "waveform", wrap(wavePosition + 1 / 32))
       - sampleSurfaceFeature(samples, "waveform", wrap(wavePosition - 1 / 32));
-    sampleResonanceMaterial(material, filaments, face.strand, face.index + 1, sample);
+    sampleResonanceMaterial(material, filaments, face.strand + (artwork ? rowStep * 0.5 : 0),
+      face.index + (artwork ? pointStep * 0.5 : 1), sample);
+    if (sample.a <= 0) continue;
+    context.globalAlpha = clamp(strength) * (artwork ? 0.98 : 0.78) * sample.a;
     // The same waveform changes relief and the reflected light ribbon.
     sample.nx += waveSlope * (0.1 + motion.bassEnergy * 0.18);
     sample.ny += Math.sin(v * TAU * 3 - motion.fastTime * 0.32) * spectrum * 0.19;
@@ -75,9 +82,16 @@ export function drawMaterialSurface(
     const spectrumDistance = (latitude - (spectrum - 0.35) * 1.15) / 0.065;
     const scopeReflection = Math.exp(-scopeDistance * scopeDistance) * (0.025 + motion.bassEnergy * 0.095 + pulse * 0.05);
     const spectrumReflection = Math.exp(-spectrumDistance * spectrumDistance) * spectrum * 0.15;
-    const r = Math.sqrt(rgb[0]) + lights.lights[0].color[0] * scopeReflection + lights.lights[1].color[0] * spectrumReflection;
-    const g = Math.sqrt(rgb[1]) + lights.lights[0].color[1] * scopeReflection + lights.lights[1].color[1] * spectrumReflection;
-    const blue = Math.sqrt(rgb[2]) + lights.lights[0].color[2] * scopeReflection + lights.lights[1].color[2] * spectrumReflection;
+    // A common display gain preserves photographic hues; per-channel gamma
+    // would change them and wash out the input image's spatial color details.
+    const photoGain = 1 / Math.sqrt(Math.max(0.01, rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722));
+    const reflectionScale = artwork ? 0.5 : 1;
+    const r = (artwork ? rgb[0] * photoGain : Math.sqrt(rgb[0]))
+      + (lights.lights[0].color[0] * scopeReflection + lights.lights[1].color[0] * spectrumReflection) * reflectionScale;
+    const g = (artwork ? rgb[1] * photoGain : Math.sqrt(rgb[1]))
+      + (lights.lights[0].color[1] * scopeReflection + lights.lights[1].color[1] * spectrumReflection) * reflectionScale;
+    const blue = (artwork ? rgb[2] * photoGain : Math.sqrt(rgb[2]))
+      + (lights.lights[0].color[2] * scopeReflection + lights.lights[1].color[2] * spectrumReflection) * reflectionScale;
     context.fillStyle = `rgb(${Math.round(clamp(r) * 255)},${Math.round(clamp(g) * 255)},${Math.round(clamp(blue) * 255)})`;
     context.beginPath();
     context.moveTo(a.x, a.y); context.lineTo(b.x, b.y);

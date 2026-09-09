@@ -13,6 +13,8 @@ export interface MaterialMap {
   heightMap: Float32Array;
   /** Artwork clamps at its edges; the silk surface repeats seamlessly. */
   wrap: boolean;
+  /** Artwork retains its spatial RGB pigment under neutral diffuse light. */
+  pigment?: "artwork" | "palette";
 }
 
 export interface MaterialSample {
@@ -25,6 +27,7 @@ export interface MaterialSample {
   nz: number;
   roughness: number;
   height: number;
+  pigment?: "artwork" | "palette";
 }
 
 export interface ReliefOptions {
@@ -215,7 +218,7 @@ export function createMaterialFromRgba(
   const heightMap = Float32Array.from(blurredLuminance, (value, index) => blurredAlpha[index]! > 1e-5 ? value / blurredAlpha[index]! : 0.5);
   const normals = normalsFromHeight(heightMap, width, height, options.strength ?? 0.045, false);
   const roughness = Float32Array.from(heightMap, (value) => clamp(0.79 - value * 0.13, 0.6, 0.85));
-  return { width, height, albedo: pixels.slice(), normals, roughness, heightMap, wrap: false };
+  return { width, height, albedo: pixels.slice(), normals, roughness, heightMap, wrap: false, pigment: "artwork" };
 }
 
 /** Wrapped bilinear sampling reuses an optional result object in the hot path. */
@@ -240,10 +243,25 @@ export function sampleMaterial(map: MaterialMap, u: number, v: number, target?: 
   const sample = (array: ArrayLike<number>, stride: number, channel: number): number =>
     array[i00 * stride + channel]! * w00 + array[i10 * stride + channel]! * w10
     + array[i01 * stride + channel]! * w01 + array[i11 * stride + channel]! * w11;
-  out.r = sample(map.albedo, 4, 0) / 255;
-  out.g = sample(map.albedo, 4, 1) / 255;
-  out.b = sample(map.albedo, 4, 2) / 255;
   out.a = sample(map.albedo, 4, 3) / 255;
+  if (map.pigment === "artwork") {
+    // Interpolate premultiplied pigment, then unpremultiply. Hidden RGB must
+    // not bleed into partially transparent edges of the actual cover texture.
+    const denominator = out.a * 255 * 255;
+    const pigment = (channel: number): number => denominator > 1e-9
+      ? (map.albedo[i00 * 4 + channel]! * map.albedo[i00 * 4 + 3]! * w00
+        + map.albedo[i10 * 4 + channel]! * map.albedo[i10 * 4 + 3]! * w10
+        + map.albedo[i01 * 4 + channel]! * map.albedo[i01 * 4 + 3]! * w01
+        + map.albedo[i11 * 4 + channel]! * map.albedo[i11 * 4 + 3]! * w11) / denominator : 0;
+    out.r = pigment(0); out.g = pigment(1); out.b = pigment(2);
+    out.pigment = "artwork";
+  } else {
+    out.r = sample(map.albedo, 4, 0) / 255;
+    out.g = sample(map.albedo, 4, 1) / 255;
+    out.b = sample(map.albedo, 4, 2) / 255;
+    // Reusing a photo sample for a palette material must clear its old mode.
+    delete out.pigment;
+  }
   out.nx = sample(map.normals, 3, 0);
   out.ny = sample(map.normals, 3, 1);
   out.nz = sample(map.normals, 3, 2);
@@ -267,5 +285,5 @@ export function recolorMaterial(material: MaterialMap, palette: ScenePalette): M
     albedo[index * 4 + 1] = Math.round(color[1] * 255);
     albedo[index * 4 + 2] = Math.round(color[2] * 255);
   }
-  return { ...material, albedo };
+  return { ...material, albedo, pigment: "palette" };
 }

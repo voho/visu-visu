@@ -1,5 +1,6 @@
 import { createSculpture } from '/lighting-mesh.js';
 import { createFrozenHistory } from '/lighting-ghosts.js';
+import { createAudioField } from '/lighting-audio-field.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -211,7 +212,7 @@ async function start() {
     metadataReady,
   ]);
   const timeline = new Float32Array(timelineBuffer);
-  if (profile.stride !== 147 || timeline.length !== profile.frameCount * profile.stride) throw new Error('Lighting timeline has an incompatible format.');
+  if (profile.stride !== 181 || timeline.length !== profile.frameCount * profile.stride) throw new Error('Lighting timeline has an incompatible format.');
   async function texture(path, unit, name, repeat = true) {
     const object = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -245,8 +246,8 @@ async function start() {
   }
   // Texture creation mutates shared active WebGL state, so loads are sequential.
   await texture('/albedo.png', 0, 'uAlbedo');
-  await texture('/normal.png', 1, 'uNormal');
-  await texture('/roughness.png', 2, 'uRoughness');
+  await texture(profile.hasArtwork ? '/object-normal.png' : '/normal.png', 1, 'uNormal', !profile.hasArtwork);
+  await texture(profile.hasArtwork ? '/object-roughness.png' : '/roughness.png', 2, 'uRoughness', !profile.hasArtwork);
   const artworkAspect = await texture(profile.hasArtwork ? '/artwork' : null, 3, 'uArtwork', false);
   const features = new Uint8Array(32 * 2);
   const featureTexture = gl.createTexture();
@@ -270,7 +271,8 @@ async function start() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const palette = profile.palette;
   if (!palette?.colors?.length) throw new Error('The preview profile does not include a scene palette. Restart the preview server.');
-  const drawSculpture = createSculpture(gl);
+  const drawSculpture = createSculpture(gl, profile.hasArtwork);
+  const audioField = createAudioField(gl, palette, profile.lowFlash);
   gl.useProgram(program);
   // Interpolate only the extracted (or seeded fallback) RGB swatches. No hue
   // rotations or unrelated material colors enter the rendered scene.
@@ -399,8 +401,10 @@ async function start() {
       gl.uniform2fv(uniform('uLightPower[0]'), powers);
       gl.uniform1f(uniform('uView'), mode);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (mode === 0) { audioField.update(values, width, height); audioField.draw(false); }
       if (mode === 0) history.draw(time, width, height);
       drawSculpture(values, width, height, mode);
+      if (mode === 0) audioField.draw(true);
       frames++;
       window.lightingPreview.renderedFrames++;
       previousTime = time;
