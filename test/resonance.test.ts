@@ -91,6 +91,32 @@ describe("harmonic resonance sculpture", () => {
     }
   });
 
+  test("joins the surface across its strand seam without a spectral displacement jump", () => {
+    const plan = createResonancePlan("closed-material-surface");
+    const shifted = {
+      ...plan,
+      filaments: plan.filaments.map((strand) => ({ ...strand, phase: strand.phase + Math.PI * 2 })),
+    };
+    const layout = createSafeLayout(1920, 1080);
+    // Changing a strand angle by one full turn must preserve its surface,
+    // including spectrally driven displacement rather than just the base torus.
+    const audio = frame({ spectrum: Float32Array.from({ length: 64 }, (_, index) => index < 16 ? 1 : 0.03) });
+    const first = createResonanceFilaments(plan, audio, visual(), layout, 12.4, true, motion(12.4));
+    const wrapped = createResonanceFilaments(shifted, audio, visual(), layout, 12.4, true, motion(12.4));
+    expect(largestDisplacement(first, wrapped)).toBeLessThan(1e-8);
+    let largestSurfaceDifference = 0;
+    for (let strand = 0; strand < first.length; strand += 1) {
+      for (let index = 0; index < first[strand]!.points.length; index += 1) {
+        const a = first[strand]!.points[index]!;
+        const b = wrapped[strand]!.points[index]!;
+        largestSurfaceDifference = Math.max(largestSurfaceDifference,
+          Math.hypot(a.surfaceX - b.surfaceX, a.surfaceY - b.surfaceY, a.surfaceZ - b.surfaceZ),
+          Math.abs(a.energy - b.energy));
+      }
+    }
+    expect(largestSurfaceDifference).toBeLessThan(1e-10);
+  });
+
   test("retains camera and glow clearance at full energy across aspect ratios and rotations", () => {
     const plan = createResonancePlan("full-energy");
     const loud = frame({ bass: 1, mid: 1, treble: 1, spectrum: new Float32Array(128).fill(1), waveform: new Float32Array(192).fill(1) });

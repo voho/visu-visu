@@ -1,0 +1,17 @@
+{
+  "name": "Flowing silk relief",
+  "version": 1,
+  "size": 512,
+  "packedSize": 128,
+  "seed": "silk-v1",
+  "source": "silk-height-source.png (AI-generated grayscale relief)",
+  "normalConvention": "+X right, +Y up, +Z toward viewer; RGB = normal * 0.5 + 0.5",
+  "normalStrength": 0.1,
+  "wrap": "repeat",
+  "maps": {
+    "albedo": "silk-albedo.png",
+    "height": "silk-height.png",
+    "normal": "silk-normal.png",
+    "roughness": "silk-roughness.png"
+  }
+}

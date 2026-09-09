@@ -1,5 +1,5 @@
 export const ANALYSIS_VERSION = 2;
-export const RENDERER_VERSION = 12;
+export const RENDERER_VERSION = 13;
 
 export interface OutputConfig {
   width: number;
@@ -21,6 +21,8 @@ export interface TextConfig {
 export interface VisualConfig {
   /** Optional local artwork, softened and masked behind the scene. */
   imagePath?: string;
+  /** Strength of normal-mapped, music-reactive surface lighting; 0 disables it. */
+  lighting?: number;
   seed: string;
   intensity: number;
   bokehCount: number;

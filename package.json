@@ -20,7 +20,9 @@
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun run test",
     "showcase:portrait": "bun src/cli.ts render test-e2e/loop.wav --output renders/resonance-portrait-60.mp4 --resolution fullhd --ratio 9:16 --fps 60 --quality final --seed loop-smoke --title \"RESONANCE\" --artist \"VISU VISU\" --fade 0.5 --overwrite",
-    "clip": "bun src/cli.ts clip"
+    "clip": "bun src/cli.ts clip",
+    "lighting:preview": "bun src/preview/lighting-server.ts",
+    "materials": "bun scripts/generate-materials.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2"

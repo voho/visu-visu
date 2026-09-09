@@ -17,6 +17,7 @@
   "visual": {
     "seed": "auto",
     "imagePath": "",
+    "lighting": 0.65,
     "intensity": 1,
     "bokehCount": 48,
     "spectrumBands": 64,

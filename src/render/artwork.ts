@@ -5,6 +5,7 @@ import { resolveArtworkPath } from "../config.js";
 import { clamp, smoothstep } from "../math/random.js";
 import { createSafeLayout } from "./layout.js";
 import type { MusicMotion } from "./music-motion.js";
+import { createMaterialFromRgba, type MaterialMap } from "./material.js";
 
 export interface PreparedArtwork {
   /** Low-resolution, softened and masked texture; no per-frame image decoding. */
@@ -14,6 +15,8 @@ export interface PreparedArtwork {
   height: number;
   accentHue: number;
   secondaryHue: number;
+  /** Luminance-derived shallow relief, with the same quiet-area masks. */
+  material?: MaterialMap;
 }
 
 export interface ArtworkMotion {
@@ -36,7 +39,7 @@ export function deriveArtworkMotion(time: number, music?: MusicMotion): ArtworkM
     zoom: 1.018 + Math.sin(musicalTime * 0.075) * 0.009 + energy(music?.bassPulse) * 0.012,
     hueShift: bass * -14 + mid * 5 + treble * 2.6,
     saturation: 1 + bass * 0.045 + mid * 0.03 + treble * 0.015,
-    opacity: 0.63 + energy(music?.sustain) * 0.09,
+    opacity: 0.72 + energy(music?.sustain) * 0.09,
   };
 }
 
@@ -108,7 +111,7 @@ export async function prepareArtwork(
     throw new Error(`Could not decode artwork ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const scale = Math.min(1, 384 / Math.max(width, height));
+  const scale = Math.min(1, 512 / Math.max(width, height));
   const textureWidth = Math.max(16, Math.round(width * scale));
   const textureHeight = Math.max(16, Math.round(height * scale));
   const raw = createCanvas(textureWidth, textureHeight);
@@ -121,7 +124,7 @@ export async function prepareArtwork(
 
   const canvas = createCanvas(textureWidth, textureHeight);
   const context = canvas.getContext("2d");
-  context.filter = `blur(${Math.max(1.5, Math.min(textureWidth, textureHeight) * 0.018)}px)`;
+  context.filter = `blur(${Math.max(0.65, Math.min(textureWidth, textureHeight) * 0.006)}px)`;
   context.drawImage(raw, 0, 0);
   context.filter = "none";
   const image = context.getImageData(0, 0, textureWidth, textureHeight);
@@ -140,22 +143,37 @@ export async function prepareArtwork(
       const green = image.data[index + 1]!;
       const blue = image.data[index + 2]!;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      const mappedLuminance = 5 + 49 * Math.pow(luminance / 255, 0.8);
+      const mappedLuminance = 8 + 95 * Math.pow(luminance / 255, 0.9);
       for (let channel = 0; channel < 3; channel += 1) {
-        image.data[index + channel] = clamp(mappedLuminance + (image.data[index + channel]! - luminance) * 0.17, 0, 78);
+        image.data[index + channel] = clamp(mappedLuminance + (image.data[index + channel]! - luminance) * 0.36, 0, 135);
       }
       const heroX = (nx - layout.centerX / width) / 0.43;
       const heroY = (ny - layout.horizon / height) / ((layout.graphBottom - layout.graphTop) / (2 * height) + 0.06);
-      const heroMask = 1 - 0.94 * Math.exp(-Math.pow(heroX * heroX + heroY * heroY, 2));
+      const heroMask = 1 - 0.6 * Math.exp(-Math.pow(heroX * heroX + heroY * heroY, 2));
       // This belongs to the artwork itself, independently of the final scene's
       // vignette. Corners dissolve while the inner periphery retains texture.
       const edgeDistance = Math.hypot((nx - 0.5) / 0.7, (ny - 0.5) / 0.7);
       const imageVignette = 1 - 0.58 * smoothstep(0.48, 1.02, edgeDistance);
-      image.data[index + 3] = Math.round(image.data[index + 3]! * creditMask * heroMask * imageVignette * 0.8);
+      image.data[index + 3] = Math.round(image.data[index + 3]! * creditMask * heroMask * imageVignette * 0.92);
     }
   }
   context.putImageData(image, 0, 0);
-  return { canvas, width, height, ...colors };
+  const reliefWidth = Math.max(16, Math.round(textureWidth / 2));
+  const reliefHeight = Math.max(16, Math.round(textureHeight / 2));
+  const relief = createCanvas(reliefWidth, reliefHeight);
+  const reliefContext = relief.getContext("2d");
+  reliefContext.drawImage(raw, 0, 0, reliefWidth, reliefHeight);
+  const material = createMaterialFromRgba(
+    reliefContext.getImageData(0, 0, reliefWidth, reliefHeight).data,
+    reliefWidth, reliefHeight,
+  );
+  reliefContext.clearRect(0, 0, reliefWidth, reliefHeight);
+  reliefContext.drawImage(canvas, 0, 0, reliefWidth, reliefHeight);
+  const protectedPixels = reliefContext.getImageData(0, 0, reliefWidth, reliefHeight).data;
+  for (let index = 3; index < material.albedo.length; index += 4) {
+    material.albedo[index] = protectedPixels[index]!;
+  }
+  return { canvas, width, height, ...colors, material };
 }
 
 /** Slow breathing plus a 1.2% bass impulse zoom; opacity never follows a beat. */

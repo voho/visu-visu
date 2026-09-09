@@ -43,6 +43,7 @@ Render options:
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
       --image <file>        Local artwork; softened, masked, and used for colors
+      --lighting <0–1>      Reactive material lighting (default: 0.65; 0 disables)
       --start <seconds>     Start within the song
       --duration <seconds>  Render only this many seconds
       --fade <seconds>      Fade picture/audio at both ends (default: 3)
@@ -59,7 +60,7 @@ Clip options (portrait Full HD60, up to 30 seconds):
   -o, --output <file>       Output MP4 (default: <song>.clip.mp4)
       --title / --artist    Override audio tags; artist is required if untagged
   Also accepts --config, --analysis, --save-analysis, --resolution, --fps,
-  --render-scale, --seed, --image, --quality, and --overwrite. Aspect ratio is always 9:16.
+  --render-scale, --seed, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
   Short sources use their available length. No clear drop: use sustained energy.
 
 Analyze options:
@@ -114,6 +115,7 @@ export function overrideConfig(
     title?: string;
     artist?: string;
     image?: string;
+    lighting?: string;
     quality?: string;
     bands?: string;
     fade?: string;
@@ -150,6 +152,8 @@ export function overrideConfig(
   if (options.title !== undefined) mutable.text.title = options.title;
   if (options.artist !== undefined) mutable.text.artist = options.artist;
   if (options.image !== undefined) mutable.visual.imagePath = resolveArtworkPath(options.image);
+  const lighting = numericOption(options.lighting, "lighting");
+  if (lighting !== undefined) mutable.visual.lighting = lighting;
   if (options.quality !== undefined) {
     if (options.quality === "preview") {
       mutable.output.crf = 22;
@@ -228,6 +232,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       title: { type: "string" },
       artist: { type: "string" },
       image: { type: "string" },
+      lighting: { type: "string" },
       duration: { type: "string" },
       quality: { type: "string" },
       overwrite: { type: "boolean", short: "y" },
@@ -263,6 +268,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
     ...(values.image === undefined ? {} : { image: values.image }),
+    ...(values.lighting === undefined ? {} : { lighting: values.lighting }),
     ...(values.fade === undefined ? {} : { fade: values.fade }),
     ...(values.quality === undefined ? {} : { quality: values.quality }),
   });

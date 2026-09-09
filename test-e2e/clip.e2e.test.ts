@@ -102,7 +102,7 @@ function inkBrightness(frame: Buffer, pixels: number[]): number {
 
 describe("portrait clip end to end", () => {
   test("runs the clip CLI through a complete 30-second music-reactive MP4 export", async () => {
-    const args = [cli, "clip", audioPath, "--output", outputPath, "--seed", "clip-e2e", "--image", imagePath];
+    const args = [cli, "clip", audioPath, "--output", outputPath, "--seed", "clip-e2e", "--image", imagePath, "--lighting", "0.8"];
     const plan = JSON.parse(await textCommand(process.execPath, [...args, "--dry-run"])) as {
       start: number; end: number; drop: number; dropOffset: number;
       duration: number; renderedDuration: number; width: number; height: number; fps: number;

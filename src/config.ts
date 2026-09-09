@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   },
   visual: {
     imagePath: "",
+    lighting: 0.65,
     seed: "auto",
     intensity: 1,
     bokehCount: 48,
@@ -161,6 +162,7 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
     },
     visual: {
       imagePath,
+      lighting: boundedNumber(visual.lighting, DEFAULT_CONFIG.visual.lighting ?? 0.65, "visual.lighting", 0, 1),
       seed: stringValue(visual.seed, DEFAULT_CONFIG.visual.seed, "visual.seed").trim() || "auto",
       intensity: boundedNumber(
         visual.intensity,

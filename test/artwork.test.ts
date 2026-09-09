@@ -40,7 +40,7 @@ describe("artwork preparation", () => {
     expect(prepared!.accentHue).toBeLessThanOrEqual(30);
     expect(prepared!.secondaryHue).toBeGreaterThanOrEqual(195);
     expect(prepared!.secondaryHue).toBeLessThanOrEqual(225);
-    expect(Math.max(prepared!.canvas.width, prepared!.canvas.height)).toBeLessThanOrEqual(384);
+    expect(Math.max(prepared!.canvas.width, prepared!.canvas.height)).toBeLessThanOrEqual(512);
     await rm(path);
     const output = createCanvas(1920, 1080);
     const outputContext = output.getContext("2d");
@@ -80,10 +80,14 @@ describe("artwork preparation", () => {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
       };
       const peripheralLuminance = pixel(0.08, 0.85);
-      expect(peripheralLuminance).toBeGreaterThan(10);
-      expect(peripheralLuminance).toBeLessThan(45);
+      expect(peripheralLuminance).toBeGreaterThan(20);
+      expect(peripheralLuminance).toBeLessThan(80);
       expect(pixel(0.5, 0.23)).toBeLessThan(peripheralLuminance * 0.12);
-      expect(pixel(0.5, heroY)).toBeLessThan(peripheralLuminance * 0.14);
+      // Cover imagery now remains visible through the translucent material,
+      // while white credits retain very strong contrast against their band.
+      expect(pixel(0.5, heroY)).toBeGreaterThan(8);
+      expect(pixel(0.5, heroY)).toBeLessThan(45);
+      expect(pixel(0.5, 0.23)).toBeLessThan(5);
       // Fine source stripes are blurred into soft color rather than retaining
       // alternating high-contrast lines around the visualization.
       expect(Math.abs(pixel(0.08, 0.85) - pixel(0.08 + 2 / width, 0.85))).toBeLessThan(3);
@@ -147,7 +151,7 @@ describe("artwork preparation", () => {
     for (let index = 0; index < beat.length; index += 4) {
       for (let channel = 0; channel < 3; channel += 1) brightnessDifference += Math.abs(beat[index + channel]! - quiet[index + channel]!);
     }
-    expect(brightnessDifference / (360 * 640 * 3)).toBeLessThan(0.3);
+    expect(brightnessDifference / (360 * 640 * 3)).toBeLessThan(0.5);
   });
 
   test("uses stronger bass tint than treble while bounding color and beat response", () => {
@@ -167,7 +171,7 @@ describe("artwork preparation", () => {
     expect(loud.saturation).toBeLessThanOrEqual(1.1);
     expect(Math.abs(loud.hueShift)).toBeLessThanOrEqual(20);
     expect(loud.zoom).toBeLessThan(1.04);
-    expect(loud.opacity).toBeLessThanOrEqual(0.72);
+    expect(loud.opacity).toBeLessThanOrEqual(0.81);
     expect(deriveArtworkMotion(20, { ...silent, bassPulse: 1 }).opacity).toBe(deriveArtworkMotion(20, silent).opacity);
     expect(deriveArtworkMotion(20, { ...silent, bassEnergy: NaN }).hueShift).toBe(0);
   });

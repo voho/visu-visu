@@ -4,7 +4,14 @@ import { onsetEventsBetween } from "../audio/onsets.js";
 import { deriveMusicMotion, type MusicMotion } from "./music-motion.js";
 import { novaEventsAt, type SupernovaEvent } from "./supernova.js";
 import { FrozenCloudLayer } from "./frozen-cloud-layer.js";
-import { drawArtwork, type PreparedArtwork } from "./artwork.js";
+import { drawArtwork, deriveArtworkMotion, type PreparedArtwork } from "./artwork.js";
+import { createMaterial, type MaterialMap, type MaterialSample } from "./material.js";
+import { lightingAt, shadeSurface, type Rgb } from "./lighting.js";
+import { MaterialLightLayer } from "./material-layer.js";
+import { sampleResonanceMaterial } from "./surface-material.js";
+import { drawMaterialSurface } from "./surface-mesh.js";
+import { deriveSceneDynamics } from "./scene-dynamics.js";
+import { SceneAtmosphere } from "./scene-atmosphere.js";
 import { deriveMusicEffects, type MusicEffects, frequencyResponse } from "./music-effects.js";
 import {
   clamp,
@@ -125,6 +132,16 @@ function resetContext(
   context.clearRect(0, 0, width, height);
 }
 
+function hslRgb(hue: number, saturation: number, lightness: number, out: Rgb): void {
+  const h = ((hue % 360) + 360) % 360 / 30;
+  const a = saturation * Math.min(lightness, 1 - lightness);
+  const channel = (offset: number): number => {
+    const k = (h + offset) % 12;
+    return lightness - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+  };
+  out[0] = channel(0); out[1] = channel(8); out[2] = channel(4);
+}
+
 export class VisualizerRenderer {
   readonly canvas: Canvas;
 
@@ -152,6 +169,10 @@ export class VisualizerRenderer {
   private readonly palettePhase: number;
   private readonly layout: SafeLayout;
   private readonly frozenClouds: FrozenCloudLayer;
+  private readonly material: MaterialMap;
+  private readonly materialLight: MaterialLightLayer;
+  private readonly artworkLight: MaterialLightLayer | undefined;
+  private readonly sceneAtmosphere: SceneAtmosphere;
   private backgroundCacheKey = "";
   private backgroundCacheAnalysis: AudioAnalysis | undefined;
 
@@ -173,6 +194,12 @@ export class VisualizerRenderer {
     this.palettePhase = artwork?.accentHue ?? (184 + createRandom(deriveSeed(this.seed, "palette"))() * 40);
     this.layout = createSafeLayout(this.width, this.height);
     this.frozenClouds = new FrozenCloudLayer(this.width, this.height, this.layout, this.seed);
+    this.material = createMaterial(seed);
+    this.materialLight = new MaterialLightLayer(this.width, this.height, this.material, this.layout);
+    this.sceneAtmosphere = new SceneAtmosphere(this.width, this.height, this.layout, seed, config.visual.lowFlash);
+    this.artworkLight = artwork?.material
+      ? new MaterialLightLayer(this.width, this.height, artwork.material, this.layout, true)
+      : undefined;
 
     this.canvas = createCanvas(this.width, this.height);
     this.context = this.canvas.getContext("2d");
@@ -330,8 +357,9 @@ export class VisualizerRenderer {
       effects,
       novas,
     );
-    this.drawStardust(frame, visual, motion.slowTime);
-    this.drawDepthGlints(frame, motion.fastTime * 2.4, visual, choreography);
+    const dynamics = deriveSceneDynamics(analysis, time);
+    this.drawStardust(frame, visual, dynamics.cloud.clock);
+    this.drawDepthGlints(frame, dynamics.detail.clock * 2.4, visual, choreography);
 
     const context = this.context;
     context.save();
@@ -344,6 +372,9 @@ export class VisualizerRenderer {
     );
     context.clip();
     this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    drawMaterialSurface(context, filaments, frame, motion, this.material,
+      lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum),
+      this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
     this.drawResonance(context, filaments, frame, visual, time, false, "back", motion, effects);
     context.save();
     context.globalAlpha = 0.09;
@@ -351,7 +382,7 @@ export class VisualizerRenderer {
     this.drawRibbonMesh(context, ribbon, visual, choreography, time, "back");
     context.restore();
     this.drawResonance(context, filaments, frame, visual, time, false, "front", motion, effects);
-    this.drawFastOrbiters(frame, motion, effects);
+    this.drawFastOrbiters(frame, { ...motion, fastTime: dynamics.spark.clock }, effects);
     context.save();
     context.globalAlpha = 0.055;
     this.drawRibbonMesh(context, ribbon, visual, choreography, time, "front");
@@ -497,6 +528,13 @@ export class VisualizerRenderer {
     // Emission already uses the hero camera. Keep bloom registered to its
     // source geometry instead of applying the atmosphere's separate drift.
     if (this.artwork) drawArtwork(output, this.artwork, time, motion);
+    const lightingStrength = this.config.visual.lighting ?? 0.65;
+    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum);
+    this.sceneAtmosphere.draw(output, deriveSceneDynamics(analysis, time), lights);
+    if (lightingStrength > 0) {
+      this.materialLight.draw(output, lights, lightingStrength);
+      this.artworkLight?.draw(output, lights, lightingStrength, deriveArtworkMotion(time, motion).zoom);
+    }
     this.frozenClouds.draw(output, analysis, time, (context, captureTime) => {
       const frozenFrame = frameAt(analysis, captureTime);
       const frozenVisual = deriveVisualState(analysis, captureTime);
@@ -866,6 +904,17 @@ export class VisualizerRenderer {
     const presence = (0.62 + frame.rms * 0.2 + visual.peak * 0.18) *
       this.config.visual.intensity;
     const hue = this.palettePhase + effects.hueShift + Math.sin(time * 0.045) * 14;
+    const lightingStrength = this.config.visual.lighting ?? 0.65;
+    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum);
+    const materialSample: MaterialSample = {r: 0, g: 0, b: 0, a: 1, nx: 0, ny: 0, nz: 1, roughness: 0.6, height: 0.5};
+    const lightColor: Rgb = [0, 0, 0];
+    const baseColor: Rgb = [0, 0, 0];
+    const gradientStops = [
+      [0, -35, 0.94, 0.7, 1], [0.3, -18, 0.98, 0.73, 1],
+      [0.52, 28, 0.91, 0.7, 0.62], [0.76, 70, 0.96, 0.68, 1],
+      [1, 110, 0.96, 0.76, 1],
+    ] as const;
+    const gradientColors: Rgb[] = gradientStops.map(() => [0, 0, 0]);
     context.save();
     context.globalCompositeOperation = "screen";
     context.lineCap = "round";
@@ -874,16 +923,10 @@ export class VisualizerRenderer {
       const filament = filaments[strand]!;
       const alpha = clamp(filament.alpha * presence * 2.3 * opacity);
       const offset = filament.hueOffset * 0.18;
-      const color = context.createLinearGradient(
-        this.layout.centerX - radius, this.layout.horizon - radius * 0.7,
-        this.layout.centerX + radius, this.layout.horizon + radius * 0.85,
-      );
-      color.addColorStop(0, hsla(hue - 35 + offset, 94, 70, alpha));
-      color.addColorStop(0.3, hsla(hue - 18 + offset, 98, 73, alpha));
-      color.addColorStop(0.52, hsla(hue + 28 + offset, 91, 70, alpha * 0.62));
-      color.addColorStop(0.76, hsla(hue + 70 + offset, 96, 68, alpha));
-      color.addColorStop(1, hsla(hue + 110 + offset, 96, 76, alpha));
-      context.strokeStyle = color;
+      for (let stop = 0; stop < gradientStops.length; stop += 1) {
+        const [, hueOffset, saturation, lightness] = gradientStops[stop]!;
+        hslRgb(hue + hueOffset + offset, saturation, lightness, gradientColors[stop]!);
+      }
       context.lineWidth = emission
         ? Math.max(1.8, radius * (0.014 + frame.mid * 0.005))
         : Math.max(0.45, radius * 0.0046) * (strand % 7 === 0 ? 1.7 : 0.85);
@@ -893,6 +936,31 @@ export class VisualizerRenderer {
       for (let start = 0; start < filament.points.length - 1; start += runLength) {
         const end = Math.min(start + runLength, filament.points.length - 1);
         const middle = filament.points[Math.floor((start + end) / 2)]!;
+        // Project onto the original diagonal gradient, then interpolate its
+        // actual RGB/alpha stops. Zero and positive lighting share this base.
+        const gradientPosition = clamp(((middle.x - this.layout.centerX + radius) * 2
+          + (middle.y - this.layout.horizon + radius * 0.7) * 1.55)
+          / Math.max(1e-9, radius * (4 + 1.55 ** 2)));
+        let lower = 0;
+        while (lower < gradientStops.length - 2 && gradientPosition > gradientStops[lower + 1]![0]) lower += 1;
+        const left = gradientStops[lower]!;
+        const right = gradientStops[lower + 1]!;
+        const amount = (gradientPosition - left[0]) / (right[0] - left[0]);
+        for (let channel = 0; channel < 3; channel += 1) {
+          baseColor[channel] = lerp(gradientColors[lower]![channel]!, gradientColors[lower + 1]![channel]!, amount);
+        }
+        let segmentAlpha = alpha * lerp(left[4], right[4], amount);
+        if (lightingStrength > 0) {
+          sampleResonanceMaterial(this.material, filaments, strand, Math.floor((start + end) / 2), materialSample);
+          shadeSurface(lights, middle.surfaceX, middle.surfaceY, middle.surfaceZ, materialSample, lightColor);
+          const lightness = lightColor[0] * 0.2126 + lightColor[1] * 0.7152 + lightColor[2] * 0.0722;
+          const shade = lerp(1, 0.62 + lightness * 1.15, lightingStrength);
+          baseColor[0] = clamp(baseColor[0] * shade + Math.sqrt(lightColor[0]) * lightingStrength * 0.13);
+          baseColor[1] = clamp(baseColor[1] * shade + Math.sqrt(lightColor[1]) * lightingStrength * 0.13);
+          baseColor[2] = clamp(baseColor[2] * shade + Math.sqrt(lightColor[2]) * lightingStrength * 0.13);
+          segmentAlpha *= lerp(1, 0.82 + materialSample.height * 0.32, lightingStrength);
+        }
+        context.strokeStyle = `rgba(${Math.round(baseColor[0] * 255)},${Math.round(baseColor[1] * 255)},${Math.round(baseColor[2] * 255)},${clamp(segmentAlpha)})`;
         context.globalAlpha = (0.12 + smoothstep(0.18, 0.82, middle.depth) * 0.88) *
           (0.5 + middle.energy * 0.7);
         context.beginPath();

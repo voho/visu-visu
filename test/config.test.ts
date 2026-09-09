@@ -40,6 +40,18 @@ describe("project configuration", () => {
     expect(config.visual.seed).toBe("night");
   });
 
+  test("validates material lighting and allows CLI disabling", () => {
+    expect(DEFAULT_CONFIG.visual.lighting).toBe(0.65);
+    const config = parseProjectConfig({ visual: { lighting: 0.9 } });
+    expect(config.visual.lighting).toBe(0.9);
+    expect(overrideConfig(config, { lighting: "0" }).visual.lighting).toBe(0);
+    expect(overrideConfig(config, { lighting: "1" }).visual.lighting).toBe(1);
+    for (const lighting of [-0.1, 1.1, NaN, Infinity, "0.5"]) {
+      expect(() => parseProjectConfig({ visual: { lighting } })).toThrow("visual.lighting");
+    }
+    expect(() => overrideConfig(config, { lighting: "no" })).toThrow("--lighting");
+  });
+
   test("rejects unknown config versions", () => {
     expect(() => parseProjectConfig({ version: 2 })).toThrow("Unsupported configuration version");
   });

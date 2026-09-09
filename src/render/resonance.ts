@@ -29,6 +29,10 @@ export interface ResonancePoint {
   /** Normalized camera depth: 0 is distant; 1 is near; .5 divides the object. */
   depth: number;
   energy: number;
+  /** Camera-space position before perspective/viewport fit; Y points up. */
+  surfaceX: number;
+  surfaceY: number;
+  surfaceZ: number;
 }
 
 export interface ResonanceFilament {
@@ -179,7 +183,9 @@ export function createResonanceFilaments(
       const u = (index / POINT_COUNT) * TAU;
       const angle = u + slowTime * 0.12 + plan.phase
         + Math.sin(u * 2 + drift * 0.4) * knot * 0.12;
-      const bandPosition = 0.5 - Math.cos(u + strand.phase * 0.18 + drift * 0.22) * 0.5;
+      // Strand variation must wrap with the poloidal angle so the filled
+      // surface joins continuously between its last and first rows.
+      const bandPosition = 0.5 - Math.cos(u + Math.sin(strand.phase) * 0.18 + drift * 0.22) * 0.5;
       const band = sampleEnvelope(envelope, bandPosition);
       const displacement = frequencyResponse(band, bandPosition);
       let wave = 0;
@@ -237,6 +243,9 @@ export function createResonanceFilaments(
         y: normalizedY,
         depth,
         energy,
+        surfaceX: projectedX,
+        surfaceY: -projectedY,
+        surfaceZ: rotatedZ,
       });
       depthSum += depth;
     }

@@ -8,6 +8,10 @@ Kick-driven supernovas add a local flash, diffraction flares, outward particles 
 
 Occasional bass accents also leave a frozen impression of the sculpture behind the live geometry. Each impression slowly enlarges, softens and dissolves over six seconds into a faint cloud. Its captured shape and colors stay still while the current sculpture keeps moving, adding depth without obscuring the music's sharper details.
 
+A translucent flowing-silk skin follows the same morphing sculpture as its filaments, using matching texture, normal and roughness maps. The spectrum also becomes a moving band of colored light: surface normals bend its reflections around the sculpture, and roughness softens its highlights. Spectrum and oscilloscope signals shape the relief and fine detail, connecting material, geometry and music. Three moving colored lights add depth: bass drives the broadest, strongest light, mids provide a slower fill, and treble contributes a smaller, quicker rim. Cover art remains recognizable behind the scene, with a deeply darkened region behind the title and artist.
+
+Six independent music responses give the scene different kinds of momentum: slow atmosphere builds and lingers, the sculpture and depth particles follow bass, fine details move with mids, and smaller sparks answer the highs. Soft cloud layers, a contact shadow, local diffraction flares and faint expanding pulses add depth around the material. Each layer has its own continuous motion clock and decay, so quick accents coexist with slower drifting detail while the cover and credits remain readable.
+
 The deterministic conductor compares each section with the track's own energy range, then hands the scene between ambient, build, peak and release modes. Quiet passages leave space around the sculpture; builds add depth and camera motion; peaks increase deformation and light; releases soften the scene. Every layer is derived from absolute time, cached analysis and seeded plans, so the result remains reproducible. Large, high-contrast title and artist typography uses restrained letter spacing and aspect-aware safe zones for TikTok, Instagram, YouTube and Vimeo players.
 
 Title and artist are centered horizontally in the full frame, with their own symmetric text bounds. The sculpture uses a separate safe composition: landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
@@ -60,7 +64,7 @@ The preview script still writes a `1920×1080` delivery file, but renders its Ca
 
 ## Input artwork
 
-Pass a local PNG, JPEG, WebP or AVIF image to derive the scene's accent colors and add a subtle atmospheric texture:
+Pass a local PNG, JPEG, WebP or AVIF image to derive the scene's accent colors and provide its artwork background:
 
 ```sh
 bun run render -- ./song.wav --image ./cover.jpg \
@@ -70,11 +74,49 @@ bun run render -- ./song.wav --image ./cover.jpg \
 bun run clip -- ./song.wav --image ./cover.jpg --artist "Artist Name"
 ```
 
-The image is downsampled, desaturated, softened and reduced in contrast before it reaches the scene. Its texture sits mostly around the edges, with quiet areas behind the title, artist and main sculpture. A separate feathered image vignette gently fades the corners into the background. Slow breathing combines with a small, bass-triggered zoom of up to 1.2%, giving the image a restrained beat response without flashing its opacity.
+The image retains visible color and recognizable detail across the scene, with gentle softening and controlled contrast. A deeply darkened, feathered band behind the title and artist keeps the credits readable, while a lighter mask lets the cover remain visible through and around the sculpture. A separate image vignette fades the corners into the background. Slow breathing combines with a small, bass-triggered zoom of up to 1.2%, giving the image a restrained beat response without flashing its opacity.
+
+The artwork also supplies a soft normal map from blurred, alpha-weighted luminance. This is an artistic relief, not physical depth estimation. Moving lights reveal restrained surface detail while preserving the cover colors, transparency, credit mask and vignette. The lighting layer leaves room around the credits and the sculpture.
 
 The artwork's tint and saturation follow the frequency mix continuously: bass produces the strongest color shift, with smaller contributions from mids and treble. The grading stays subtle, with at most a 9% saturation boost. A palette sampled from the image also supplies the sculpture's accents, while musical color changes and light effects remain active. The source artwork is not modified.
 
 Use `visual.imagePath` to store the image in a project config. Relative paths in that field resolve beside the config file; relative `--image` paths resolve from the current working directory and override the config value. Leave `imagePath` empty to use the procedural atmosphere alone. SVG and image URLs are not supported. Reproducible artwork renders require the same image bytes as well as the same audio and visual settings.
+
+## Textures and reactive lighting
+
+The committed [material assets](./assets/materials/README.md) include a 512 × 512 albedo texture, height map, tangent-space normal map and roughness map. They come from one AI-generated grayscale relief source, processed into a seamless repeating surface. The normal map changes how moving lights meet the surface; roughness controls the width of its highlights. The analyzed spectrum also illuminates the surface as a reflected band of colored light. Its appearance follows each surface normal and the viewing direction; rougher areas spread the highlight. Low frequencies produce broader, stronger light, while high frequencies contribute narrower detail. Spectrum and signed waveform signals also perturb relief and shape fine reflections across the material skin. A packed 128 × 128 height field keeps runtime construction synchronous and inexpensive.
+
+Lighting defaults to `0.65`. Use `--lighting 0..1` on `render` or `clip`, or set `visual.lighting` in your config:
+
+```sh
+bun run render -- ./song.wav --image ./cover.png --lighting 0.8
+bun run clip -- ./song.wav --artist "Artist Name" --lighting 0.45
+```
+
+`--lighting 0` disables this material lighting. The three point lights and reflected spectrum follow absolute musical time and frequency envelopes, so direct seeks recreate the same light positions and highlights. Low-flash mode reduces fast light accents while retaining their motion. Large, centered title and artist text is drawn after lighting and remains unaffected by it.
+
+Regenerate all maps deterministically from the committed source:
+
+```sh
+bun run materials
+# Optional: generate a separate procedural material without an image source.
+bun run materials -- --procedural --out-dir ./renders/procedural-material
+```
+
+See the [material notes](./assets/materials/README.md) for source provenance, map conventions and custom source options. Regeneration preserves the source image.
+
+## Live visualization preview
+
+Explore the flowing sculpture, material maps and music-driven lights with a local WebGL preview:
+
+```sh
+bun run lighting:preview -- ./song.wav --image ./cover.png \
+  --title "Night Signal" --artist "Artist Name" --low-flash
+```
+
+Open the printed local address, normally `http://127.0.0.1:4180`. Play or seek the song to explore a folded ring that opens, closes and bends into a knot, combining a translucent normal-mapped skin with luminous filaments, traveling tracers and a faint contour echo. Slowly warped clouds, several particle depths, a soft shadow and local flare pulses surround the sculpture, with subtle camera and cover drift, beat zoom and gradual color changes. The spectrum itself lights the folds through their surface normals, while spectrum and oscilloscope signals also shape the sculpture and sharper accents. Switch between **Illuminated**, **Texture**, **Normal map** and **Roughness** views to inspect the same moving geometry. The page draws at the browser's refresh cadence and reports its measured frame rate. Use `--port` to choose a different local port and `--seed` for repeatable light placement.
+
+The WebGL preview combines the visualizer's flowing geometry with the new material and lighting effects. Its GPU mesh uses 64 filaments with 192 segments each; exported videos use the offline 72-filament Canvas scene, which also includes frozen clouds and the full export composition. Use `render` or `clip` to create MP4s. The preview and export share musical signals and visual behavior, with different mesh densities and drawing paths rather than pixel-identical frames. Audio and optional artwork are served locally; the server binds to `127.0.0.1`.
 
 ## Smoke renders
 
@@ -119,7 +161,7 @@ bun run clip -- ./song.mp3 --artist "Artist Name" --duration 20 --lead-in 4 --fa
 
 Title and artist come from `--title` / `--artist`, then project text settings, then audio tags. A missing title falls back to the filename; if the artist is still missing, the command asks for `--artist` instead of exporting an uncredited clip. Both lines use the existing large, high-contrast typography.
 
-Default output is `<song>.clip.mp4`. Use `--overwrite` to replace an existing file. Clips always use 9:16; `--resolution`, `--fps`, `--render-scale`, `--quality`, `--seed`, `--image`, `--config`, `--analysis` and `--save-analysis` remain available. The clip profile defaults to Full HD60 and `final` encoding even when the project config uses landscape dimensions or another frame rate. A reused analysis must match the selected frame rate and source file.
+Default output is `<song>.clip.mp4`. Use `--overwrite` to replace an existing file. Clips always use 9:16; `--resolution`, `--fps`, `--render-scale`, `--quality`, `--seed`, `--image`, `--lighting`, `--config`, `--analysis` and `--save-analysis` remain available. The clip profile defaults to Full HD60 and `final` encoding even when the project config uses landscape dimensions or another frame rate. A reused analysis must match the selected frame rate and source file.
 
 A source shorter than the requested clip is used in full. Drops near the beginning get the available lead-in; drops near the end keep the requested lead-in and produce a shorter excerpt. Sources are never looped to fill time. Fades shorten when necessary to keep the chosen drop at full volume, with a brief hold before the end fade. Very short excerpts proportionally fit the entrance and exit fades without overlap. Normal clip durations round down to complete frames; a fractional final source frame can add less than one frame of padded delivery time, reported separately as `renderedDuration` in dry-run JSON. `--duration` accepts at most 30 seconds; omitted lead-in becomes half the duration for clips shorter than ten seconds.
 
@@ -140,7 +182,7 @@ The analysis contains time-indexed RMS, peak, a log-frequency spectrum, bass/mid
 
 Cached analysis is bound to the exact source file as well as its decoded PCM. The current analysis version remains **2**; regenerate older versions with `bun run analyze`. A cache must also match the output frame rate, so regenerate a 24 or 30 fps cache for a 60 fps render. The renderer rejects a cache paired with another audio file, malformed feature values, unsupported versions, or inconsistent frame counts. JSON caches are capped at 128 MiB; longer-form sets should currently be analyzed as part of the render instead of saved.
 
-With the same decoded audio, input image bytes (if supplied), settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **12**; analysis remains at version **2**. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
+With the same decoded audio, input image bytes (if supplied), bundled material source, settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **13**; analysis remains at version **2**. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
 
 ## Project configuration
 
@@ -170,6 +212,7 @@ bun run render -- ./song.wav --config ./visu.config.json
   "visual": {
     "seed": "auto",
     "imagePath": "",
+    "lighting": 0.65,
     "intensity": 1,
     "bokehCount": 48,
     "spectrumBands": 64,
@@ -211,7 +254,7 @@ The optional `output.maxBitrateMbps` config field defaults to `16`, accepts fini
 
 ## Platform-safe composition
 
-Nebula, bokeh, stardust and glints fill the frame. Processed artwork and dissolving sculpture clouds sit behind the sharp geometry and leave the text area quiet. The sculpture, orbital ribbon echoes and rings use a clipped graph region, while title and artist occupy a separate symmetric safe text region:
+Nebula, bokeh, stardust and glints fill the frame. Processed artwork, a softly lit material atmosphere and dissolving sculpture clouds sit behind the sharp geometry and leave the text area quiet. The sculpture, orbital ribbon echoes and rings use a clipped graph region, while title and artist occupy a separate symmetric safe text region:
 
 | Output shape | Text width | Graph bounds |
 | --- | --- | --- |
@@ -245,7 +288,7 @@ song
                  └─ FFmpeg H.264 + original audio AAC → .mp4
 ```
 
-The renderer never reads wall-clock time and never calls `Math.random()`. Filaments, tracers, nebula lobes, bokeh, stardust, glints, orbital effects, onset accents and grain use seeded plans or analytic motion. Slow and fast musical time come from cached prefix integrals of audio envelopes, so speed can react to the song while direct seeking follows the same path. Slow atmosphere is cached in frame-aligned buckets with source-analysis identity checks. Frozen clouds use a sparse bass-event plan: each small cached snapshot is rebuilt from its event's fixed capture time, then zoomed, blurred and dissolved by its absolute age. Bloom is rebuilt for each frame and uses the sculpture's camera transform to stay aligned with the emitting geometry. The conductor and all music-reactive layers read analysis by absolute timestamp, keeping direct seeking deterministic and leaving future parallel frame rendering possible.
+The offline renderer never reads wall-clock time and never calls `Math.random()`. Filaments, tracers, nebula lobes, bokeh, stardust, glints, orbital effects, onset accents, material placement, moving lights and grain use seeded plans or analytic motion. Slow and fast musical time come from cached prefix integrals of audio envelopes, so speed can react to the song while direct seeking follows the same path. Slow atmosphere is cached in frame-aligned buckets with source-analysis identity checks. Frozen clouds use a sparse bass-event plan: each small cached snapshot is rebuilt from its event's fixed capture time, then zoomed, blurred and dissolved by its absolute age. Bloom is rebuilt for each frame and uses the sculpture's camera transform to stay aligned with the emitting geometry. The conductor and all music-reactive layers read analysis by absolute timestamp, keeping direct seeking deterministic and leaving future parallel frame rendering possible.
 
 See [docs/architecture.md](./docs/architecture.md) for module boundaries and the intended studio evolution.
 
@@ -257,7 +300,7 @@ bun run test
 bun run check
 ```
 
-`bun run test` runs the regular suite in `test/`; `bun run check` runs type checking and that same suite. Tests cover the FFT, normalized analysis, frame-rate-aware envelopes, onset timing, strict cache validation, adaptive section choreography, slow/fast music motion, frequency-weighted effects, centered credits and aspect-aware graph bounds, changing resonance silhouettes and orbital geometry, supernova causality and decay, frozen-cloud capture timing and deterministic dissolution, artwork preprocessing, vignette, beat zoom, frequency tint and path handling, low-flash motion preservation, music-reactive grading, configuration, seeded randomness and repeatable RGBA rendering. Real FFmpeg tests encode and decode native landscape and portrait Full HD60 videos, checking each distinct frame, A/V timing, upload codecs and color, bitrate limits and faststart.
+`bun run test` runs the regular suite in `test/`; `bun run check` runs type checking and that same suite. Tests cover the FFT, normalized analysis, frame-rate-aware envelopes, onset timing, strict cache validation, adaptive section choreography, slow/fast music motion, frequency-weighted effects, centered credits and aspect-aware graph bounds, changing resonance silhouettes and orbital geometry, supernova causality and decay, frozen-cloud capture timing and deterministic dissolution, artwork preprocessing, vignette, beat zoom, frequency tint and path handling, coherent material generation and normal conventions, wrapped sampling, alpha-preserving cover relief, deterministic light positions, surface-normal-dependent spectrum lighting, six causal spectral/momentum tiers, protected atmosphere composition and bounded shading, low-flash motion preservation, music-reactive grading, configuration, seeded randomness and repeatable RGBA rendering. Real FFmpeg tests encode and decode native landscape and portrait Full HD60 videos, checking each distinct frame, A/V timing, upload codecs and color, bitrate limits and faststart.
 
 Run the longer CLI-to-MP4 clip test separately:
 
