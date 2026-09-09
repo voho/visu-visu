@@ -1,7 +1,7 @@
 import { createSculpture } from '/lighting-mesh.js';
 import { createFrozenHistory } from '/lighting-ghosts.js';
 import { createAudioField } from '/lighting-audio-field.js';
-import { previewCamera } from '/lighting-camera.js';
+import { previewCamera, preparePreviewCamera, setPreviewHero } from '/lighting-camera.js';
 import { createSculptureGlow } from '/lighting-glow.js';
 import { createDepthParticles } from '/lighting-particles.js';
 import { createSculptureLensing } from '/lighting-lensing.js';
@@ -132,6 +132,20 @@ void main() {
   float curtain=pow(0.5+0.5*sin(curtainP.x*8.0+curl.y*3.8+cloudClock*0.20),6.0);
   float curtainShape=exp(-pow(curtainP.y+sin(curtainP.x*2.7+driftClock*0.10)*0.25,2.0)*4.0);
   background+=mix(uLightColor[0],uLightColor[2],curl.y)*curtain*curtainShape*aura*(0.024+cloudEnergy*0.055)*textProtection;
+  // Four narrow, translucent light curtains frame the photograph. Separate
+  // broad, middle and fine lobes add depth without a blanket of brighter fog.
+  for(int i=0;i<4;i++) {
+    float lane=float(i),side=lane<2.0?-1.0:1.0;
+    float baseX=lane<2.0?0.16+lane*0.13:0.71+(lane-2.0)*0.13;
+    float bend=sin(uv.y*4.4+cloudClock*0.24+lane*1.9)*(0.028+cloudEnergy*0.022)
+      +sin(uv.y*8.0-driftClock*0.31+lane)*0.010;
+    float distance=(uv.x-baseX-bend-side*sin(driftClock*0.16+lane)*0.018)*aspect;
+    float broad=exp(-distance*distance*680.0),middle=exp(-distance*distance*3600.0),fine=exp(-distance*distance*24000.0);
+    float endFade=smoothstep(0.30,0.53,uv.y)*(1.0-smoothstep(0.86,1.0,uv.y));
+    float ripples=0.70+0.30*sin(uv.y*18.0+detailClock*0.26+lane*2.0);
+    vec3 ribbonColor=texture2D(uPalette,vec2(fract(lane*0.24+cloudClock*0.024+detailEnergy*0.08),0.5)).rgb;
+    background+=ribbonColor*(broad*0.20+middle*0.43+fine*0.72)*endFade*ripples*(0.070+cloudEnergy*0.105+bodyEnergy*0.035);
+  }
   background+=(uLightColor[0]*0.024+uLightColor[1]*0.025)*aura*(0.65+bodyEnergy*0.35);
   // A soft moving shadow anchors the light sculpture without hiding the cover.
   vec2 shadow=(p-vec2(sin(bodyClock*0.09)*0.02,-0.33))/vec2(0.31,0.065);
@@ -150,10 +164,20 @@ void main() {
   float flareAmount=impactEnergy*uImpactLimit*(0.25+frequency*0.75);
   background+=flareColor*(halo*0.28+horizontal*0.35+vertical*0.24+nova*0.050)
     *flareAmount*textProtection;
+  // Broad pulses travel out from the sculpture on the delayed impact clock;
+  // their edges and brightness fade before each phase wraps around.
+  vec2 pulseP=rotation(driftClock*0.08)*p/vec2(aspect<1.0?0.92:1.35,0.84);
+  for(int i=0;i<3;i++) {
+    float phase=fract(uDynamics[2].w*0.115+float(i)/3.0);
+    float radius=0.20+phase*0.79;
+    float edge=length(pulseP)-radius;
+    float ring=exp(-edge*edge*12000.0)*0.55+exp(-edge*edge*850.0)*0.20;
+    float fade=pow(sin(phase*PI),2.0);
+    vec3 ringColor=mix(uLightColor[0],uLightColor[2],float(i)/2.0);
+    background+=ringColor*ring*fade*(0.045+impactEnergy*uImpactLimit*0.28)*textProtection;
+  }
   float vignette = 1.0 - smoothstep(0.25, 0.83, length((uv - 0.5) * vec2(1.1, 1.0)));
   background *= 0.48 + vignette * 0.52;
-  // Quiet lower third for centered track/artist credits.
-  background *= 0.57 + smoothstep(0.17, 0.4, uv.y) * 0.43;
   gl_FragColor = vec4(background, 1.0);
 }
 `;
@@ -223,6 +247,7 @@ async function start() {
   ]);
   const timeline = new Float32Array(timelineBuffer);
   if (profile.stride !== 181 || timeline.length !== profile.frameCount * profile.stride) throw new Error('Lighting timeline has an incompatible format.');
+  preparePreviewCamera(timeline,profile);
   async function texture(path, unit, name, repeat = true) {
     const object = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -422,6 +447,7 @@ async function start() {
       gl.enableVertexAttribArray(position);
       gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
       if (size !== lastSize) {
+        setPreviewHero(innerWidth,innerHeight,credits.hidden?innerHeight*0.72:credits.getBoundingClientRect().top);
         canvas.width = width;
         canvas.height = height;
         gl.viewport(0, 0, width, height);

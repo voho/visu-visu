@@ -23,7 +23,7 @@ void main() {
   float depth=fract(aSeed.x+clock*rate*(0.7+aSeed.w*0.6));
   float perspective=0.42+pow(depth,1.7)*1.30;
   float angle=aSeed.y*6.28318530718+clock*rate*(aSeed.w-0.5)*3.2;
-  float radius=0.30+aSeed.z*0.72;
+  float radius=0.22+aSeed.z*0.76;
   vec2 p=vec2(cos(angle),sin(angle))*radius*perspective;
   p.x*=1.25;
   p+=vec2(sin(angle*2.0+clock*rate),cos(angle*3.0-clock*rate))*0.035;
@@ -31,11 +31,11 @@ void main() {
   vec2 pixel=uCamera.xy*uResolution+p*min(uResolution.x,uResolution.y);
   gl_Position=vec4(pixel/uResolution*2.0-1.0,0.0,1.0);
   float nearBlur=pow(depth,3.0)*(aLayer<1.5?1.0:0.42);
-  gl_PointSize=min(64.0,(2.0+nearBlur*48.0+aSeed.z*3.0)*min(uResolution.x,uResolution.y)/900.0);
+  gl_PointSize=min(84.0,(2.2+nearBlur*(64.0+energy*20.0)+aSeed.z*3.0)*min(uResolution.x,uResolution.y)/900.0);
   float gate=smoothstep(0.0,0.12,depth)*(1.0-smoothstep(0.79,1.0,depth));
   float frontWeight=smoothstep(0.58,0.78,depth);
   gate*=uFront>0.5?frontWeight:1.0-frontWeight;
-  vAlpha=gate*(0.18+energy*0.26)*(0.65+aSeed.z*0.35);
+  vAlpha=gate*(0.23+energy*0.31)*(0.65+aSeed.z*0.35)*(1.0+nearBlur*0.14);
   vDepth=nearBlur;vPhase=fract(aSeed.y+clock*rate*0.16+energy*0.12);vAngle=angle;
 }`;
   const fragmentSource=`
@@ -51,7 +51,7 @@ void main() {
   p=mat2(cos(vAngle),sin(vAngle),-sin(vAngle),cos(vAngle))*p;
   float r=length(p);
   float core=exp(-dot(p,p)*(vDepth>0.12?5.0:12.0));
-  float bokeh=exp(-pow(r-0.55,2.0)*65.0)*vDepth*0.20;
+  float bokeh=exp(-pow(r-0.55,2.0)*65.0)*vDepth*0.28;
   float streak=exp(-p.y*p.y*80.0-p.x*p.x*4.0)*(1.0-vDepth)*0.23;
   float edge=1.0-smoothstep(0.76,1.0,r);
   float credits=smoothstep(0.29,0.48,gl_FragCoord.y/uResolution.y);

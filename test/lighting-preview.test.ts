@@ -14,7 +14,7 @@ import type { AnalysisFrame } from "../src/types.js";
 import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
 import { prepareArtwork } from "../src/render/artwork.js";
 import { audioFieldAt } from "../src/render/audio-field.js";
-import { previewCamera } from "../src/preview/lighting-camera.js";
+import { previewCamera, preparePreviewCamera, setPreviewHero } from "../src/preview/lighting-camera.js";
 import { deriveSceneDynamics } from "../src/render/scene-dynamics.js";
 import { deriveMusicMotion } from "../src/render/music-motion.js";
 import { lightingAt } from "../src/render/lighting.js";
@@ -214,12 +214,47 @@ describe("live lighting preview", () => {
       const camera = previewCamera(values, 1920, 1080);
       expect(camera).toEqual(previewCamera(values, 480, 270));
       expect(previewCamera(values, 390, 844)).toEqual(previewCamera(values, 195, 422));
-      expect(Math.abs(camera.roll)).toBeLessThanOrEqual(0.084);
+      expect(Math.abs(camera.roll - Math.PI / 2)).toBeLessThanOrEqual(0.084);
       expect(camera.zoom).toBeGreaterThan(0.84);
-      expect(camera.zoom).toBeLessThan(0.945);
+      expect(camera.zoom).toBeLessThan(1.35);
       expect(camera.x).toBeGreaterThan(0.485);
       expect(camera.x).toBeLessThan(0.515);
     }
+  });
+
+  test("preflight fitting is deterministic across seeks and caps intersample zoom speed", () => {
+    const profile = { duration: 4, fps: 60, frameCount: 241, stride: LIGHTING_TIMELINE_STRIDE };
+    const timeline = new Float32Array(profile.frameCount * profile.stride);
+    for (let frame = 0; frame < profile.frameCount; frame++) {
+      const time = frame / 60, row = timeline.subarray(frame * profile.stride, (frame + 1) * profile.stride);
+      row[0] = time * 0.5; row[1] = time * 1.7;
+      for (let layer = 0; layer < 6; layer++) {
+        row[135 + layer * 2] = 0.4 + Math.sin(time * (layer + 1)) * 0.15;
+        row[136 + layer * 2] = time * (layer + 1) * 0.2;
+      }
+      for (let band = 0; band < 32; band++) row[36 + band] = 0.3 + Math.sin(time * 4 + band) * 0.15;
+    }
+    const row = (frame: number) => timeline.subarray(frame * profile.stride, (frame + 1) * profile.stride);
+    setPreviewHero(1920, 1080, 734);
+    preparePreviewCamera(timeline, profile);
+    const beforeSeek = previewCamera(row(107), 1920, 1080);
+    previewCamera(row(230), 1920, 1080);
+    previewCamera(row(5), 1920, 1080);
+    expect(previewCamera(row(107), 1920, 1080)).toEqual(beforeSeek);
+    expect(previewCamera(row(107), 480, 270)).toEqual(beforeSeek);
+    let previous = previewCamera(row(0), 1920, 1080);
+    for (let frame = 1; frame < profile.frameCount; frame++) {
+      const camera = previewCamera(row(frame), 1920, 1080);
+      expect(Object.values(camera).every(Number.isFinite)).toBe(true);
+      expect(Math.abs(camera.zoom - previous.zoom)).toBeLessThan(0.012);
+      previous = camera;
+    }
+    const beyondEnd = new Float32Array(row(240)); beyondEnd[0] = 1e4;
+    expect(Object.values(previewCamera(beyondEnd, 1920, 1080)).every(Number.isFinite)).toBe(true);
+    preparePreviewCamera(new Float32Array(timeline.length), profile);
+    expect(previewCamera(row(107), 1920, 1080)).not.toEqual(beforeSeek);
+    preparePreviewCamera(timeline, profile);
+    expect(previewCamera(row(107), 1920, 1080)).toEqual(beforeSeek);
   });
 
   test("cover lens brackets stay causal and fit their bounded geometry atlas", () => {

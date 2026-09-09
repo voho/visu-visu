@@ -65,7 +65,10 @@ void main() {
       for(const layer of layers)layer.length=0;
       const size=Math.min(width,height),portrait=width<height;
       const camera=previewCamera(values,width,height);
-      const scaleX=Math.min(width*0.43,size*0.53)*camera.zoom,scaleY=size*(portrait?0.39:0.31)*camera.zoom;
+      // The landscape sculpture camera is a quarter turn wider; exchange the
+      // orbit axes so its surrounding spectral field remains a horizontal ring.
+      const scaleX=(portrait?Math.min(width*0.43,size*0.53):size*0.31)*camera.zoom;
+      const scaleY=(portrait?size*0.39:Math.min(width*0.43,size*0.53))*camera.zoom;
       const centerX=width*camera.x,centerY=height*camera.y;
       const cosine=Math.cos(camera.roll),sine=Math.sin(camera.roll);
       const baseWidth=Math.max(1.2,size*0.0023);

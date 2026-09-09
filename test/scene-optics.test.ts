@@ -44,13 +44,13 @@ describe("inertial scene optics", () => {
         const state = dynamics(1, time);
         const camera = sceneCameraAt(state, 1.7);
         const shape = createResonanceFilaments(plan, frame, visual, layout, time, false,
-          { ...motion, slowTime: time * 0.3, fastTime: time * 2 });
+          { ...motion, slowTime: time * 0.3, fastTime: time * 2 }, camera);
         const radius = safeGraphRadius(layout);
         const field = audioFieldGeometry(frame.spectrum, frame.waveform, 1, 1, time);
         const points: Array<{ x: number; y: number }> = shape.flatMap(strand => strand.points);
         points.push(...field.spokes.flatMap(spoke => [
-          { x: layout.centerX + spoke.x2 * Math.min(layout.width * 0.4, radius * 1.55),
-            y: layout.horizon + spoke.y2 * radius * 0.78 },
+          { x: layout.centerX + spoke.x2 * Math.min(layout.width * 0.43, radius * 1.95),
+            y: layout.horizon + spoke.y2 * radius * 0.84 },
         ]));
         let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
         for (const point of points) {

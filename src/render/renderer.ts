@@ -15,7 +15,7 @@ import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface } from "./surface-mesh.js";
 import { deriveSceneDynamics, type SceneDynamics } from "./scene-dynamics.js";
 import { SceneAtmosphere } from "./scene-atmosphere.js";
-import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraMatrix } from "./scene-optics.js";
+import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraAt, sceneCameraMatrix } from "./scene-optics.js";
 import { audioFieldAt, audioFieldGeometry, drawAudioField } from "./audio-field.js";
 import { deriveMusicEffects, type MusicEffects, frequencyResponse } from "./music-effects.js";
 import {
@@ -325,6 +325,7 @@ export class VisualizerRenderer {
       this.resonancePlan, frame, visual, this.layout, time,
       this.config.visual.lowFlash,
       motion,
+      sceneCameraAt(dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction),
     );
 
     const novas = novaEventsAt(analysis, time, this.seed, this.config.visual.lowFlash);
@@ -506,7 +507,8 @@ export class VisualizerRenderer {
       const captureDynamics = deriveSceneDynamics(analysis, captureTime);
       const captureMotion = inertialMusicMotion(deriveMusicMotion(analysis, captureTime), captureDynamics);
       const shape = createResonanceFilaments(this.resonancePlan, captureFrame,
-        deriveVisualState(analysis, captureTime), this.layout, captureTime, this.config.visual.lowFlash, captureMotion);
+        deriveVisualState(analysis, captureTime), this.layout, captureTime, this.config.visual.lowFlash, captureMotion,
+        sceneCameraAt(captureDynamics, this.palettePhase * 0.01, this.ribbonPlan.direction));
       return createArtworkWarpField(shape, this.width, this.height, this.layout,
         sceneCameraMatrix(this.layout, captureDynamics, this.palettePhase * 0.01, this.ribbonPlan.direction),
         0.35 + captureDynamics.cloud.energy * 0.45 + captureDynamics.body.energy * 0.20);
@@ -526,7 +528,8 @@ export class VisualizerRenderer {
       const frozenMotion = inertialMusicMotion(deriveMusicMotion(analysis, captureTime), frozenDynamics);
       const frozenEffects = deriveMusicEffects(frozenMotion, this.config.visual.lowFlash, frozenDynamics);
       const frozenFilaments = createResonanceFilaments(this.resonancePlan, frozenFrame, frozenVisual,
-        this.layout, captureTime, this.config.visual.lowFlash, frozenMotion);
+        this.layout, captureTime, this.config.visual.lowFlash, frozenMotion,
+        sceneCameraAt(frozenDynamics, this.palettePhase * 0.01, this.ribbonPlan.direction));
       context.save();
       this.applyGraphCamera(context, frozenDynamics);
       drawMaterialSurface(context, frozenFilaments, frozenFrame, frozenMotion, this.material,
@@ -820,7 +823,8 @@ export class VisualizerRenderer {
       const echoMotion = inertialMusicMotion(deriveMusicMotion(analysis, echoTime), echoDynamics);
       const echoEffects = deriveMusicEffects(echoMotion, this.config.visual.lowFlash, echoDynamics);
       const echo = createResonanceFilaments(this.echoPlan, echoFrame, echoVisual,
-        this.layout, echoTime, this.config.visual.lowFlash, echoMotion);
+        this.layout, echoTime, this.config.visual.lowFlash, echoMotion,
+        sceneCameraAt(deriveSceneDynamics(analysis, time), this.palettePhase * 0.01, this.ribbonPlan.direction));
       const opacity = smoothstep(0.18, 0.32, time) * (0.28 + effects.glow * 0.18);
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "back", echoMotion, echoEffects, opacity);
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "front", echoMotion, echoEffects, opacity);
@@ -1819,18 +1823,13 @@ export class VisualizerRenderer {
     const rise = lerp(this.height * 0.004, 0, smoothstep(0.08, 0.65, time));
 
     context.save();
-    context.beginPath();
-    context.rect(
-      this.layout.textLeft,
-      this.layout.top,
-      this.layout.textWidth,
-      this.layout.graphTop - this.layout.top,
-    );
-    context.clip();
     context.globalAlpha = alpha;
     context.filter = "none";
-    context.shadowColor = "rgba(0,0,0,0.82)";
-    context.shadowBlur = Math.min(6, this.width * 0.0032);
+    // Only the letter silhouettes cast shade. Let their wide soft feather
+    // extend naturally over the cover instead of clipping it into a text band.
+    context.shadowColor = "rgba(0,0,0,0.9)";
+    context.shadowBlur = Math.min(this.width, this.height) * 0.026;
+    context.shadowOffsetY = Math.min(this.width, this.height) * 0.003;
     context.textBaseline = "top";
 
     const textBoxHeight = this.layout.graphTop - safeY;
@@ -1873,7 +1872,7 @@ export class VisualizerRenderer {
 
     if (artist) {
       context.filter = "none";
-      context.shadowBlur = Math.min(4, this.width * 0.0022);
+      context.shadowBlur = Math.min(this.width, this.height) * 0.023;
       context.fillStyle = this.color(this.palettePhase + 72, 16, 96, 0.96);
       const artistY = title ? safeY + rise + titleSize * 1.12 : safeY + rise;
       this.drawFittedText(
@@ -1979,7 +1978,7 @@ export class VisualizerRenderer {
       context.fillText(line.text, textLeft + line.left, y + line.ascent);
     };
     drawLine(titleLine, textTop);
-    context.shadowBlur = Math.min(4, this.width * 0.0022);
+    context.shadowBlur = smallSide * 0.023;
     context.fillStyle = this.color(this.palettePhase + 72, 16, 96, 0.96);
     drawLine(artistLine, textTop + titleLine.height + lineGap);
   }

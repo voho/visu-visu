@@ -23,6 +23,14 @@ export interface ResonancePlan {
   filaments: readonly ResonanceStrand[];
 }
 
+/** Shared hero camera; translation is measured in the graph's half extents. */
+export interface ResonanceCamera {
+  x: number;
+  y: number;
+  roll: number;
+  zoom: number;
+}
+
 export interface ResonancePoint {
   x: number;
   y: number;
@@ -135,6 +143,7 @@ export function createResonanceFilaments(
   time: number,
   lowFlash: boolean,
   motion?: MusicMotion,
+  camera?: ResonanceCamera,
 ): ResonanceFilament[] {
   const seconds = Number.isFinite(time) ? time : 0;
   const slowTime = motion?.slowTime ?? seconds * 0.28;
@@ -154,7 +163,7 @@ export function createResonanceFilaments(
   const harmonics = waveformHarmonics(frame.waveform);
   const horizontalHalf = Math.max(0, Math.min(layout.centerX - layout.left, layout.right - layout.centerX));
   const verticalHalf = Math.max(0, Math.min(layout.horizon - layout.graphTop, layout.graphBottom - layout.horizon));
-  const inset = motion ? 0.77 : 0.93;
+  const inset = 0.90;
   const radiusY = Math.min(verticalHalf, horizontalHalf) * inset;
   const radiusX = Math.min(horizontalHalf * inset, radiusY * 1.8);
   const drift = slowTime * 0.46 + plan.phase;
@@ -176,6 +185,11 @@ export function createResonanceFilaments(
   const cosZ = Math.cos(roll);
 
   let projectedExtent = 0;
+  const cameraCos = Math.cos(camera?.roll ?? 0);
+  const cameraSin = Math.sin(camera?.roll ?? 0);
+  const cameraZoom = camera?.zoom ?? (motion ? 1.118 : 1.07);
+  const availableX = Math.max(1, horizontalHalf * (1 - Math.abs(camera?.x ?? (motion ? 0.02 : 0))));
+  const availableY = Math.max(1, verticalHalf * (1 - Math.abs(camera?.y ?? (motion ? 0.015 : 0))));
   const filaments = plan.filaments.map((strand) => {
     const points: ResonancePoint[] = [];
     let depthSum = 0;
@@ -233,7 +247,19 @@ export function createResonanceFilaments(
       const perspective = 3.8 / (3.8 - rotatedZ);
       const normalizedX = projectedX * perspective;
       const normalizedY = projectedY * perspective;
-      projectedExtent = Math.max(projectedExtent, Math.abs(normalizedX), Math.abs(normalizedY));
+      const screenX = normalizedX * radiusX;
+      const screenY = normalizedY * radiusY;
+      // Fit the entire volume after the same camera that will draw it. Calls
+      // without a camera retain a conservative reserve for maximum motion.
+      const projectedWidth = camera
+        ? Math.abs(screenX * cameraCos - screenY * cameraSin)
+        : Math.abs(screenX) + Math.abs(screenY) * (motion ? 0.065 : 0);
+      const projectedHeight = camera
+        ? Math.abs(screenX * cameraSin + screenY * cameraCos)
+        : Math.abs(screenY) + Math.abs(screenX) * (motion ? 0.065 : 0);
+      projectedExtent = Math.max(projectedExtent,
+        projectedWidth * cameraZoom / availableX,
+        projectedHeight * cameraZoom / availableY);
       const depth = clamp(0.5 + rotatedZ / 3.2);
       const energy = clamp(0.19 + band * 0.45 + mid * 0.07 + beat * 0.055
         + treble * (0.055 + Math.cos(u * 7 - drift + strand.phase) * 0.055)
@@ -258,10 +284,10 @@ export function createResonanceFilaments(
       depth: depthSum / POINT_COUNT,
     };
   });
-  // Fit the complete projected object as one volume at extreme energy. This
-  // preserves flowing contours and reserves space for camera roll, drift, scale,
-  // and emission strokes without clipping individual vertices.
-  const fit = 0.96 / Math.max(0.96, projectedExtent);
+  // A smooth bounded close-up lets compact poses fill the scene, while still
+  // leaving room for folds, drift and light. One scalar preserves the outline;
+  // the soft floor avoids pumping the camera on edge-on poses or FFT boundaries.
+  const fit = 0.94 / Math.pow(projectedExtent ** 8 + 0.70 ** 8, 1 / 8);
   for (const strand of filaments) {
     for (const point of strand.points) {
       point.x = layout.centerX + point.x * fit * radiusX;

@@ -70,6 +70,7 @@ export function atmosphereParticleAt(
   const y = creditBottom + areaHeight * (0.52 + (particle.y - 0.52) * perspective
     + Math.sin(phase * 0.71 + particle.phase) * sway * 0.72);
   const brightness = slow ? 0.13 : body ? 0.19 : detail ? 0.23 : 0.27;
+  const nearGlow = smoothstep(0.5, 0.86, depth);
   const edge = smoothstep(creditBottom, creditBottom + areaHeight * 0.1, y)
     * (1 - smoothstep(height * 0.9, height, y))
     * smoothstep(-width * 0.05, width * 0.05, x)
@@ -78,8 +79,10 @@ export function atmosphereParticleAt(
     x, y, depth,
     softness: smoothstep(0.5, 0.94, depth) * (slow ? 1 : body ? 0.8 : 0.45),
     radius: Math.max(0.32, Math.min(width, height) * particle.radius * particle.depth
-      * (0.5 + perspective * 0.8) * (1 + energy * (slow ? 0.7 : body ? 0.4 : 0.18))),
-    alpha: edge * flightFade * brightness * (0.45 + energy * 0.55) * (0.58 + particle.depth * 0.25),
+      * (0.5 + perspective * 0.8) * (1 + nearGlow * 0.45)
+      * (1 + energy * (slow ? 0.95 : body ? 0.6 : 0.18))),
+    alpha: edge * flightFade * brightness * (0.45 + energy * 0.55)
+      * (0.58 + particle.depth * 0.25) * (1 + nearGlow * 0.10),
   };
 }
 
@@ -209,25 +212,27 @@ export class SceneAtmosphere {
       context.restore();
     }
 
+    this.drawLightCurtains(context, dynamics, lights);
+
     // The clouds keep their long envelope; fast light accents alone are softened.
     const flashScale = this.lowFlash ? 0.3 : 1;
     if (impact > 0.004) {
       for (let index = 0; index < 3; index += 1) {
         const phase = wrap(impactClock * 0.2 + index / 3);
-        const ringRadius = this.radius * (0.23 + phase * 1.55);
-        const ringAlpha = impact * Math.sin(phase * Math.PI) ** 2 * 0.10 * flashScale;
+        const ringRadius = this.radius * (0.32 + phase * 2.05);
+        const ringAlpha = impact * Math.sin(phase * Math.PI) ** 2 * 0.16 * flashScale;
         context.save();
         context.translate(this.layout.centerX, this.layout.horizon);
         context.rotate(bodyClock * 0.095 + this.flarePhase + index * 0.3);
         context.scale(1.22, 0.62 + Math.sin(cloudClock * 0.2) * 0.08);
         const ringTint = index === 0 ? key : index === 1 ? fill : rim;
-        context.strokeStyle = color(ringTint, ringAlpha * 0.14);
-        context.lineWidth = Math.max(2, this.radius * (0.026 + phase * 0.03));
+        context.strokeStyle = color(ringTint, ringAlpha * 0.22);
+        context.lineWidth = Math.max(2, this.radius * (0.035 + phase * 0.055));
         context.beginPath();
         context.arc(0, 0, ringRadius, 0, TAU);
         context.stroke();
         context.strokeStyle = color(ringTint, ringAlpha);
-        context.lineWidth = Math.max(0.5, this.radius * 0.0032);
+        context.lineWidth = Math.max(0.5, this.radius * 0.004);
         context.beginPath();
         context.arc(0, 0, ringRadius, 0, TAU);
         context.stroke();
@@ -236,10 +241,10 @@ export class SceneAtmosphere {
       const position = lights.lights[0].position;
       const x = this.layout.centerX + position[0] * this.radius * 0.85;
       const y = this.layout.horizon - position[1] * this.radius * 0.65;
-      const flareRadius = this.radius * (0.14 + impact * 0.20);
+      const flareRadius = this.radius * (0.20 + impact * 0.26);
       const flare = context.createRadialGradient(x, y, 0, x, y, flareRadius);
-      flare.addColorStop(0, color(key, impact * 0.14 * flashScale));
-      flare.addColorStop(0.14, color(key, impact * 0.061 * flashScale));
+      flare.addColorStop(0, color(key, impact * 0.13 * flashScale));
+      flare.addColorStop(0.14, color(key, impact * 0.067 * flashScale));
       flare.addColorStop(1, color(key, 0));
       context.fillStyle = flare;
       context.fillRect(x - flareRadius, y - flareRadius, flareRadius * 2, flareRadius * 2);
@@ -247,18 +252,18 @@ export class SceneAtmosphere {
       context.translate(x, y);
       context.rotate(this.flarePhase + bodyClock * 0.16 + Math.sin(cloudClock * 0.3) * 0.25);
       for (let axis = 0; axis < 3; axis += 1) {
-        const length = this.radius * (axis === 0 ? 0.7 : axis === 1 ? 0.25 : 0.42) * (0.65 + impact * 0.35);
+        const length = this.radius * (axis === 0 ? 0.9 : axis === 1 ? 0.35 : 0.58) * (0.65 + impact * 0.35);
         const streak = context.createLinearGradient(-length, 0, length, 0);
         streak.addColorStop(0, color(key, 0));
-        streak.addColorStop(0.5, color(key, impact * 0.12 * flashScale));
+        streak.addColorStop(0.5, color(key, impact * 0.10 * flashScale));
         streak.addColorStop(1, color(key, 0));
         context.strokeStyle = streak;
-        context.globalAlpha = 0.28;
-        context.lineWidth = Math.max(2, this.radius * 0.019);
+        context.globalAlpha = 0.32;
+        context.lineWidth = Math.max(2, this.radius * 0.030);
         context.beginPath();
         context.moveTo(-length, 0); context.lineTo(length, 0); context.stroke();
         context.globalAlpha = 1;
-        context.lineWidth = Math.max(0.55, this.radius * 0.0028);
+        context.lineWidth = Math.max(0.55, this.radius * 0.0038);
         context.beginPath();
         context.moveTo(-length, 0); context.lineTo(length, 0); context.stroke();
         context.rotate(axis === 0 ? Math.PI / 2 : Math.PI / 4);
@@ -267,6 +272,63 @@ export class SceneAtmosphere {
     }
 
     this.drawParticles(context, dynamics, lights, false);
+    context.restore();
+  }
+
+  /** Four slow, curved light curtains frame the hero without a full-frame veil. */
+  private drawLightCurtains(context: SKRSContext2D, dynamics: SceneDynamics, lights: LightingState): void {
+    const cloud = unit(dynamics.cloud.energy);
+    const body = unit(dynamics.body.energy);
+    const drift = unit(dynamics.drift.energy);
+    const cloudClock = positive(dynamics.cloud.clock);
+    const driftClock = positive(dynamics.drift.clock);
+    const smallSide = Math.min(this.width, this.height);
+    const top = this.layout.graphTop + this.height * 0.025;
+    const bottom = this.height * 0.98;
+    const span = bottom - top;
+    context.save();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    for (let index = 0; index < 4; index += 1) {
+      const plan = this.clouds[index]!;
+      const side = index < 2 ? -1 : 1;
+      const inset = index % 2;
+      const phase = plan.phase + cloudClock * 0.24;
+      const curl = driftClock * 0.31 + plan.phase;
+      const x = this.width * (0.5 + side * (0.34 - inset * 0.13)
+        + Math.sin(phase) * (0.018 + cloud * 0.016));
+      const bow = this.width * (0.044 + cloud * 0.04 + body * 0.02);
+      const tipX = x + Math.sin(curl) * this.width * 0.055;
+      const alpha = 0.035 + cloud * 0.048 + drift * 0.017;
+      const source = lights.lights[index % 3]!.color;
+      const second = lights.lights[(index + 1) % 3]!.color;
+      const mix = 0.35 + Math.sin(curl * 0.43) * 0.25;
+      const tint: Rgb = [
+        source[0] * (1 - mix) + second[0] * mix,
+        source[1] * (1 - mix) + second[1] * mix,
+        source[2] * (1 - mix) + second[2] * mix,
+      ];
+      const glow = context.createLinearGradient(x, top, tipX, bottom);
+      glow.addColorStop(0, color(tint, 0));
+      glow.addColorStop(0.18, color(tint, alpha * 0.5));
+      glow.addColorStop(0.48, color(tint, alpha));
+      glow.addColorStop(0.82, color(tint, alpha * 0.36));
+      glow.addColorStop(1, color(tint, 0));
+      context.strokeStyle = glow;
+      const width = smallSide * (0.018 + cloud * 0.022 + body * 0.014);
+      // Nested diffuse strokes are cheap at output resolution and never need
+      // a fullscreen blur buffer. Their shared curve keeps every edge flowing.
+      for (const [spread, opacity] of [[2.9, 0.12], [1.2, 0.30], [0.26, 0.72]] as const) {
+        context.globalAlpha = opacity;
+        context.lineWidth = width * spread;
+        context.beginPath();
+        context.moveTo(x, top);
+        context.bezierCurveTo(x - side * bow, top + span * 0.3,
+          tipX + side * bow * (0.9 + Math.sin(phase * 0.7) * 0.35), bottom - span * 0.32,
+          tipX, bottom);
+        context.stroke();
+      }
+    }
     context.restore();
   }
 
@@ -305,6 +367,11 @@ export class SceneAtmosphere {
         halo.addColorStop(1, color(tint, 0));
         context.fillStyle = halo;
         context.fillRect(pose.x - haloRadius, pose.y - haloRadius, haloRadius * 2, haloRadius * 2);
+        if (foreground && (particle.tier === "drift" || particle.tier === "body")) {
+          context.strokeStyle = color(tint, pose.alpha * pose.softness * 0.11);
+          context.lineWidth = Math.max(0.4, pose.radius * 0.18);
+          context.beginPath(); context.arc(pose.x, pose.y, haloRadius * 0.40, 0, TAU); context.stroke();
+        }
       }
       if (particle.tier !== "drift") {
         const trailClock = particle.tier === "body" ? 0.22 : particle.tier === "detail" ? 0.32 : 0.42;
@@ -318,7 +385,7 @@ export class SceneAtmosphere {
           context.quadraticCurveTo(middle.x, middle.y, pose.x, pose.y); context.stroke();
         }
       }
-      context.fillStyle = color(tint, pose.alpha * (1 - pose.softness * 0.76));
+      context.fillStyle = color(tint, pose.alpha * (1 - pose.softness * 0.76) * 0.95);
       context.beginPath(); context.arc(pose.x, pose.y, pose.radius, 0, TAU); context.fill();
     }
   }

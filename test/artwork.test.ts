@@ -83,12 +83,12 @@ describe("artwork preparation", () => {
       const peripheralLuminance = pixel(0.08, 0.85);
       expect(peripheralLuminance).toBeGreaterThan(20);
       expect(peripheralLuminance).toBeLessThan(80);
-      expect(pixel(0.5, 0.23)).toBeLessThan(peripheralLuminance * 0.12);
-      // Cover imagery now remains visible through the translucent material,
-      // while white credits retain very strong contrast against their band.
+      // The original cover must flow through the credits without a full-width
+      // dark stripe. Its overall grade stays subdued for light text shadows.
+      expect(pixel(0.5, 0.23)).toBeGreaterThan(peripheralLuminance * 0.55);
+      expect(pixel(0.5, 0.23)).toBeLessThan(95);
       expect(pixel(0.5, heroY)).toBeGreaterThan(8);
       expect(pixel(0.5, heroY)).toBeLessThan(45);
-      expect(pixel(0.5, 0.23)).toBeLessThan(5);
       // Fine source stripes are blurred into soft color rather than retaining
       // alternating high-contrast lines around the visualization.
       expect(Math.abs(pixel(0.08, 0.85) - pixel(0.08 + 2 / width, 0.85))).toBeLessThan(3);
@@ -143,7 +143,7 @@ describe("artwork preparation", () => {
     const backgroundCreditPosition = sampleMaterial(landscape.material!, 0.5, 0.22);
     expect(objectCreditPosition.a).toBe(1);
     expect(objectCreditPosition.r).toBe(1);
-    expect(backgroundCreditPosition.a).toBeLessThan(0.05);
+    expect(backgroundCreditPosition.a).toBeGreaterThan(0.4);
     expect(sampleMaterial(object, 0.5, 0.75).a).toBe(0);
     for (let index = 0; index < object.normals.length; index += 3) {
       expect(Math.hypot(object.normals[index]!, object.normals[index + 1]!, object.normals[index + 2]!)).toBeCloseTo(1, 6);

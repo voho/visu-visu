@@ -83,8 +83,8 @@ export function drawAudioField(
   lowFlash: boolean,
 ): void {
   const radius = safeGraphRadius(layout);
-  const rx = Math.min(layout.width * 0.40, radius * 1.55);
-  const ry = radius * 0.78;
+  const rx = Math.min(layout.width * 0.43, radius * 1.95);
+  const ry = radius * 0.84;
   const width = Math.max(1.2, radius * 0.0076);
   context.save();
   context.globalCompositeOperation = "screen";

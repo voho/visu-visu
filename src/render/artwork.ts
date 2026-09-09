@@ -56,8 +56,8 @@ export function deriveArtworkMotion(time: number, music?: MusicMotion): ArtworkM
 
 /**
  * Prepare local raster artwork once. A cover crop preserves its peripheral
- * texture; blur, compressed luminance, and a fixed quiet region prevent bright
- * cover art or baked-in lettering from competing with the actual song credits.
+ * texture; blur and compressed luminance keep the cover behind the scene.
+ * Credit readability comes from shadows on the letters, never a dark stripe.
  */
 export async function prepareArtwork(
   imagePath: string | undefined,
@@ -142,13 +142,8 @@ export async function prepareArtwork(
   context.filter = "none";
   const image = context.getImageData(0, 0, textureWidth, textureHeight);
   const layout = createSafeLayout(width, height);
-  const textCenterY = (layout.titleY + layout.graphTop) / (2 * height);
-  const textHalfHeight = (layout.graphTop - layout.titleY) / (2 * height) + 0.035;
   for (let y = 0; y < textureHeight; y += 1) {
     const ny = (y + 0.5) / textureHeight;
-    // Wide, softly feathered horizontal credit band stays quiet while the
-    // artwork breathes. The ellipse protects the entire moving hero volume.
-    const creditMask = 1 - 0.98 * Math.exp(-Math.pow((ny - textCenterY) / textHalfHeight, 4));
     for (let x = 0; x < textureWidth; x += 1) {
       const nx = (x + 0.5) / textureWidth;
       const index = (y * textureWidth + x) * 4;
@@ -167,7 +162,7 @@ export async function prepareArtwork(
       // vignette. Corners dissolve while the inner periphery retains texture.
       const edgeDistance = Math.hypot((nx - 0.5) / 0.7, (ny - 0.5) / 0.7);
       const imageVignette = 1 - 0.58 * smoothstep(0.48, 1.02, edgeDistance);
-      image.data[index + 3] = Math.round(image.data[index + 3]! * creditMask * heroMask * imageVignette * 0.92);
+      image.data[index + 3] = Math.round(image.data[index + 3]! * heroMask * imageVignette * 0.92);
     }
   }
   context.putImageData(image, 0, 0);
