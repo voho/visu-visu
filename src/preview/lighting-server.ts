@@ -10,6 +10,8 @@ import { surfaceFeatureSamples, SURFACE_FEATURE_BANDS } from "../render/surface-
 import { deriveSceneDynamics, SCENE_LAYER_NAMES } from "../render/scene-dynamics.js";
 import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME, type FrozenCloudCapture, type FrozenCloudEvent } from "../render/frozen-cloud.js";
 import type { AudioAnalysis } from "../types.js";
+import { prepareArtwork } from "../render/artwork.js";
+import { randomPalette, type ScenePalette } from "../render/palette.js";
 
 export const LIGHTING_FEATURE_BANDS = SURFACE_FEATURE_BANDS;
 export const LIGHTING_TIMELINE_STRIDE = 36 + LIGHTING_FEATURE_BANDS * 3 + 3 + SCENE_LAYER_NAMES.length * 2;
@@ -58,6 +60,7 @@ export interface LightingPreviewProfile {
   frameCount: number;
   stride: number;
   hasArtwork: boolean;
+  palette: ScenePalette;
   lowFlash?: boolean;
   ghosts?: LightingGhostSchedule;
 }
@@ -80,14 +83,19 @@ export function buildLightingGhostSchedule(analysis: AudioAnalysis): LightingGho
 }
 
 /** Compact deterministic uniforms; playback/seek time comes from the audio element. */
-export function buildLightingTimeline(analysis: AudioAnalysis, seed: string, lowFlash = false): Float32Array {
+export async function prepareLightingPalette(imagePath: string | undefined, seed: string): Promise<ScenePalette> {
+  const artwork = await prepareArtwork(imagePath, 1920, 1080);
+  return artwork?.palette ?? randomPalette(seed);
+}
+
+export function buildLightingTimeline(analysis: AudioAnalysis, seed: string, lowFlash = false, palette: ScenePalette = randomPalette(seed)): Float32Array {
   const output = new Float32Array(analysis.frames.length * LIGHTING_TIMELINE_STRIDE);
   for (let index = 0; index < analysis.frames.length; index += 1) {
     const time = index / analysis.fps;
     const motion = deriveMusicMotion(analysis, time);
     const dynamics = deriveSceneDynamics(analysis, time);
-    const paletteHue = 26 + dynamics.drift.clock * 9 + dynamics.cloud.energy * 12;
-    const state = lightingAt(motion, time, seed, paletteHue, lowFlash, analysis.frames[index]!.spectrum);
+    const paletteHue = palette.anchorHue + dynamics.drift.clock * 9 + dynamics.cloud.energy * 12;
+    const state = lightingAt(motion, time, seed, paletteHue, lowFlash, analysis.frames[index]!.spectrum, palette);
     let offset = index * LIGHTING_TIMELINE_STRIDE;
     for (const value of [motion.slowTime, motion.fastTime, motion.bassEnergy, motion.midEnergy,
       motion.trebleEnergy, motion.bassPulse, motion.treblePulse, motion.sustain,
@@ -196,7 +204,9 @@ async function main(): Promise<void> {
   console.log("Analyzing music for synchronized lighting…");
   const [pcm, tags] = await Promise.all([decodeAudio(options.audioPath), readAudioMetadata(options.audioPath)]);
   const analysis = analyzeAudio(pcm, 60, 64);
-  const timeline = buildLightingTimeline(analysis, options.seed ?? analysis.sourceHash.slice(0, 16), options.lowFlash);
+  const seed = options.seed ?? analysis.sourceHash.slice(0, 16);
+  const palette = await prepareLightingPalette(options.imagePath, seed);
+  const timeline = buildLightingTimeline(analysis, seed, options.lowFlash, palette);
   const files = new Map<string, string>([
     ["/", resolve(import.meta.dir, "lighting.html")],
     ["/lighting.js", resolve(import.meta.dir, "lighting.js")],
@@ -213,7 +223,7 @@ async function main(): Promise<void> {
     title: options.title ?? tags.title ?? basename(options.audioPath, extname(options.audioPath)),
     artist: options.artist ?? tags.artist ?? "", duration: analysis.duration,
     fps: analysis.fps, frameCount: analysis.frames.length, stride: LIGHTING_TIMELINE_STRIDE,
-    hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
+    palette, hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
   };
   const server = Bun.serve({ hostname: "127.0.0.1", port: options.port, fetch: createLightingPreviewHandler(profile, timeline, files) });
   console.log(`Live resonance preview: ${server.url}\n${profile.title}${profile.artist ? ` — ${profile.artist}` : ""}\nPress Ctrl+C to stop.`);

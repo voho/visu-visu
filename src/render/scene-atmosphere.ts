@@ -150,9 +150,10 @@ export class SceneAtmosphere {
     context.scale(1, 0.17);
     const shadowRadius = this.radius * (0.8 + body * 0.17);
     const shadow = context.createRadialGradient(0, 0, 0, 0, 0, shadowRadius);
-    shadow.addColorStop(0, `rgba(1,3,8,${0.07 + body * 0.075})`);
-    shadow.addColorStop(0.4, `rgba(1,3,8,${0.038 + body * 0.03})`);
-    shadow.addColorStop(1, "rgba(1,3,8,0)");
+    const shadowTint: Rgb = [key[0] * 0.012, key[1] * 0.012, key[2] * 0.012];
+    shadow.addColorStop(0, color(shadowTint, 0.07 + body * 0.075));
+    shadow.addColorStop(0.4, color(shadowTint, 0.038 + body * 0.03));
+    shadow.addColorStop(1, color(shadowTint, 0));
     context.fillStyle = shadow;
     context.fillRect(-shadowRadius, -shadowRadius, shadowRadius * 2, shadowRadius * 2);
     context.restore();

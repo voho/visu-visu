@@ -97,6 +97,7 @@ uniform sampler2D uNormal;
 uniform sampler2D uRoughness;
 uniform sampler2D uFeatures;
 uniform sampler2D uStrip;
+uniform sampler2D uPalette;
 uniform vec3 uStripState;
 uniform float uPass;
 uniform float uView;
@@ -108,6 +109,7 @@ varying vec2 vUv;
 varying float vEnergy;
 const float TAU=6.28318530718;
 vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
+ albedo=vec3(dot(albedo,vec3(0.2126,0.7152,0.0722)));
  vec3 view=normalize(vec3(0.0,0.0,3.4)-vPosition);
  float nv=max(dot(normal,view),0.0);
  float exponent=4.0+pow(1.0-roughness,2.0)*92.0;
@@ -146,7 +148,12 @@ vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
 }
 void main() {
  vec2 uv=vUv*vec2(2.0,1.0)+vec2(uClock.x*0.006,0.0);
- vec3 albedo=texture2D(uAlbedo,uv).rgb;
+ vec3 rawAlbedo=texture2D(uAlbedo,uv).rgb;
+ float materialDetail=dot(rawAlbedo,vec3(0.2126,0.7152,0.0722));
+ vec3 pigment=texture2D(uPalette,vec2(fract(vUv.y+uClock.x*0.009),0.5)).rgb;
+ // Preserve the generated texture's relief/luminance while its pigment comes
+ // exclusively from this image's palette, including neutral monochrome images.
+ vec3 albedo=mix(vec3(1.0),pigment,0.78)*(0.35+materialDetail*0.80);
  vec3 bump=normalize(texture2D(uNormal,uv).rgb*2.0-1.0);
  float roughness=clamp(texture2D(uRoughness,uv).r,0.08,1.0);
  vec3 geometric=normalize(vNormal);
@@ -159,7 +166,7 @@ void main() {
  float wave=texture2D(uFeatures,vec2(featureX,0.75)).r*2.0-1.0;
  float slope=texture2D(uFeatures,vec2(min(0.984,featureX+0.03125),0.25)).r-spectrum;
  vec3 normal=normalize(geometric*bump.z+tangent*(bump.x*0.42-slope*0.14)+bitangent*bump.y*0.42);
- vec3 color=lighting(normal,albedo,roughness);
+ vec3 color=lighting(normal,rawAlbedo,roughness);
  float graph=0.30+spectrum*(1.0-featureX*0.78)*(0.22+uMotion.x*0.16);
  float osc=0.72+wave*(0.05+uMotion.x*0.11);
  float spectrumLine=exp(-abs(vUv.y-graph)*140.0);
@@ -213,7 +220,7 @@ void main() {
   const surfaceBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,surfaceBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
   const lineBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(lines),gl.STATIC_DRAW);
   const attribute=gl.getAttribLocation(program,'aParameter');
-  for(const [name,unit]of[['uAlbedo',0],['uNormal',1],['uRoughness',2],['uFeatures',4],['uStrip',5]])gl.uniform1i(uniform(name),unit);
+  for(const [name,unit]of[['uAlbedo',0],['uNormal',1],['uRoughness',2],['uFeatures',4],['uStrip',5],['uPalette',7]])gl.uniform1i(uniform(name),unit);
   const positions=new Float32Array(9),colors=new Float32Array(9),powers=new Float32Array(6);
   return (values,width,height,mode)=>{
     gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,parameterBuffer);gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,2,gl.FLOAT,false,0,0);

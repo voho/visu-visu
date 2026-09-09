@@ -28,6 +28,7 @@ uniform sampler2D uNormal;
 uniform sampler2D uRoughness;
 uniform sampler2D uArtwork;
 uniform sampler2D uFeatures;
+uniform sampler2D uPalette;
 uniform float uHasArtwork;
 uniform float uArtworkAspect;
 uniform float uView;
@@ -82,14 +83,17 @@ void main() {
   float sparkEnergy=uDynamics[2].x, sparkClock=uDynamics[2].y;
   float impactEnergy=uDynamics[2].z;
   p/=1.0+bodyEnergy*0.016+impactEnergy*0.008;
-  vec3 background = vec3(0.023, 0.025, 0.043);
+  vec3 background = texture2D(uPalette,vec2(fract(driftClock*0.016),0.5)).rgb*0.038;
   if (uHasArtwork > 0.5) {
     vec2 cover = uv - 0.5;
     if (aspect > uArtworkAspect) cover.y *= uArtworkAspect / aspect;
     else cover.x *= aspect / uArtworkAspect;
     cover /= 1.045 + pulse * 0.009 + bass * 0.006 + bodyEnergy * 0.008;
     cover += vec2(sin(driftClock*0.31),cos(driftClock*0.23))*0.0025*driftEnergy;
-    vec3 art = texture2D(uArtwork, cover + 0.5).rgb;
+    // Artwork is uploaded premultiplied, so invisible RGB padding cannot leak
+    // into palette-constrained colors through texture interpolation.
+    vec4 artworkSample = texture2D(uArtwork, cover + 0.5);
+    vec3 art = artworkSample.rgb;
     float luminance = dot(art, vec3(0.2126, 0.7152, 0.0722));
     art = mix(vec3(luminance), art, 0.32);
     vec3 tint = normalize(uLightColor[0] + uLightColor[1] + vec3(0.8));
@@ -184,8 +188,6 @@ async function start() {
   const position = gl.getAttribLocation(program, 'aPosition');
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-  const drawSculpture = createSculpture(gl);
-  gl.useProgram(program);
   const uniforms = new Map();
   const uniform = name => {
     if (!uniforms.has(name)) uniforms.set(name, gl.getUniformLocation(program, name));
@@ -215,7 +217,7 @@ async function start() {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, object);
     // Complete placeholder texture makes optional artwork deterministic.
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([12, 12, 20, 255]));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([12, 12, 12, 255]));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -230,6 +232,7 @@ async function start() {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     // Normal / roughness data must bypass browser color conversions.
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, name === 'uArtwork');
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
     const powerOfTwo = value => value > 0 && (value & (value - 1)) === 0;
     if (repeat && powerOfTwo(image.width) && powerOfTwo(image.height)) {
@@ -265,6 +268,36 @@ async function start() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const palette = profile.palette;
+  if (!palette?.colors?.length) throw new Error('The preview profile does not include a scene palette. Restart the preview server.');
+  const drawSculpture = createSculpture(gl);
+  gl.useProgram(program);
+  // Interpolate only the extracted (or seeded fallback) RGB swatches. No hue
+  // rotations or unrelated material colors enter the rendered scene.
+  const samplePalette = phase => {
+    const wrapped = ((phase % 1) + 1) % 1 * palette.colors.length;
+    const left = Math.floor(wrapped), amount = wrapped - left;
+    const a = palette.colors[left], b = palette.colors[(left + 1) % palette.colors.length];
+    return a.map((value, channel) => value + (b[channel] - value) * amount);
+  };
+  const palettePixels = new Uint8Array(256 * 4);
+  for (let index = 0; index < 256; index++) {
+    const color = samplePalette(index / 256);
+    for (let channel = 0; channel < 3; channel++) palettePixels[index * 4 + channel] = Math.round(Math.max(0, Math.min(1, color[channel])) * 255);
+    palettePixels[index * 4 + 3] = 255;
+  }
+  const paletteTexture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, palettePixels);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.uniform1i(uniform('uPalette'), 7);
+  const creditColor = (phase, whiten) => `rgb(${samplePalette(phase).map(value => Math.round((value + (1 - value) * whiten) * 255)).join(' ')})`;
+  document.documentElement.style.setProperty('--credit-title', creditColor(0, 0.95));
+  document.documentElement.style.setProperty('--credit-artist', creditColor(0.34, 0.87));
+  document.documentElement.style.setProperty('--credit-accent', creditColor(0.67, 0.70));
   gl.uniform1f(uniform('uHasArtwork'), profile.hasArtwork ? 1 : 0);
   gl.uniform1f(uniform('uImpactLimit'), profile.lowFlash ? 0.4 : 1);
   gl.uniform1f(uniform('uArtworkAspect'), artworkAspect);
@@ -316,7 +349,7 @@ async function start() {
   let lastSize = '';
   let fps = 0;
   // Exposes only diagnostic counters; source paths and audio data stay on the server.
-  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0, ghostPixelHash: id => history.pixelHash(id) };
+  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0, ghostPixelHash: id => history.pixelHash(id), palette: { source: palette.source, colors: palette.colors } };
   function draw(now) {
     const time = Math.max(0, Math.min(profile.duration, audio.currentTime || 0));
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);

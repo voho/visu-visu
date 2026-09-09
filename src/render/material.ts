@@ -1,5 +1,6 @@
 import { silkHeightBytes, silkHeightSize } from "../../assets/materials/silk-height.js";
 import { clamp, createRandom, deriveSeed } from "../math/random.js";
+import { paletteRgb, type ScenePalette } from "./palette.js";
 
 export interface MaterialMap {
   width: number;
@@ -253,4 +254,18 @@ export function sampleMaterial(map: MaterialMap, u: number, v: number, target?: 
   out.roughness = sample(map.roughness, 1, 0);
   out.height = sample(map.heightMap, 1, 0);
   return out;
+}
+
+/** Replace baked pigment with the scene palette; keep relief, roughness and alpha. */
+export function recolorMaterial(material: MaterialMap, palette: ScenePalette): MaterialMap {
+  const albedo = material.albedo.slice();
+  const color: [number, number, number] = [0, 0, 0];
+  for (let index = 0; index < material.heightMap.length; index += 1) {
+    const relief = material.heightMap[index]!;
+    paletteRgb(palette, relief * 170, 100, 35 + relief * 25, color);
+    albedo[index * 4] = Math.round(color[0] * 255);
+    albedo[index * 4 + 1] = Math.round(color[1] * 255);
+    albedo[index * 4 + 2] = Math.round(color[2] * 255);
+  }
+  return { ...material, albedo };
 }

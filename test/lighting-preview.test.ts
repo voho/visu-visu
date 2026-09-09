@@ -2,8 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createCanvas } from "@napi-rs/canvas";
+import { randomPalette } from "../src/render/palette.js";
 import {
-  buildLightingTimeline, buildLightingGhostSchedule, createLightingPreviewHandler, LIGHTING_TIMELINE_STRIDE,
+  buildLightingTimeline, buildLightingGhostSchedule, createLightingPreviewHandler, prepareLightingPalette, LIGHTING_TIMELINE_STRIDE,
   parseByteRange, parseLightingPreviewArgs,
 } from "../src/preview/lighting-server.js";
 import { analyzeAudio } from "../src/audio/analyze.js";
@@ -17,6 +19,13 @@ beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "visu-lighting-preview-"));
   audioPath = join(directory, "song.wav");
   await writeFile(audioPath, "0123456789");
+  for (const [name, color] of [["warm", "#d02718"], ["cool", "#193ed8"], ["gray", "#828282"]]) {
+    const cover = createCanvas(48, 48);
+    const context = cover.getContext("2d");
+    context.fillStyle = color!;
+    context.fillRect(0, 0, 48, 48);
+    await writeFile(join(directory, `${name}.png`), cover.toBuffer("image/png"));
+  }
 });
 afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
@@ -48,7 +57,7 @@ describe("live lighting preview", () => {
     const timeline = new Float32Array([1, 2, 3]);
     const handler = createLightingPreviewHandler({
       title: "<script>literal credit</script>", artist: "Artist", duration: 1,
-      fps: 60, frameCount: 1, stride: LIGHTING_TIMELINE_STRIDE, hasArtwork: false,
+      fps: 60, frameCount: 1, stride: LIGHTING_TIMELINE_STRIDE, hasArtwork: false, palette: randomPalette("preview-test"),
     }, timeline, new Map([["/audio", audioPath]]));
     const response = await handler(new Request("http://127.0.0.1:4180/audio", { headers: { Range: "bytes=3-5" } }));
     expect(response.status).toBe(206);
@@ -69,6 +78,43 @@ describe("live lighting preview", () => {
     expect(profile.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
     const binary = await handler(new Request("http://127.0.0.1/timeline.f32"));
     expect(Array.from(new Float32Array(await binary.arrayBuffer()))).toEqual([1, 2, 3]);
+  });
+
+  test("cover palettes drive distinct profiles and keep grayscale lighting neutral", async () => {
+    const [warm, cool, gray, fallback] = await Promise.all([
+      prepareLightingPalette(join(directory, "warm.png"), "same-seed"),
+      prepareLightingPalette(join(directory, "cool.png"), "same-seed"),
+      prepareLightingPalette(join(directory, "gray.png"), "same-seed"),
+      prepareLightingPalette(undefined, "same-seed"),
+    ]);
+    expect(warm.source).toBe("artwork");
+    expect(cool.source).toBe("artwork");
+    expect(gray.source).toBe("artwork");
+    expect(fallback.source).toBe("random");
+    expect(warm.colors).not.toEqual(cool.colors);
+    expect(fallback).toEqual(await prepareLightingPalette(undefined, "same-seed"));
+    expect(fallback).not.toEqual(await prepareLightingPalette(undefined, "other-seed"));
+    for (const color of gray.colors) {
+      expect(color[0]).toBeCloseTo(color[1], 6);
+      expect(color[1]).toBeCloseTo(color[2], 6);
+    }
+    const samples = Float32Array.from({ length: 24_000 }, (_, index) => Math.sin(index / 24_000 * Math.PI * 2 * 65) * 0.5);
+    const analysis = analyzeAudio({ samples, sampleRate: 24_000, duration: 1, sourceHash: "0".repeat(64), sourceFileHash: "0".repeat(64) }, 60, 64);
+    const warmTimeline = buildLightingTimeline(analysis, "same-seed", false, warm);
+    const coolTimeline = buildLightingTimeline(analysis, "same-seed", false, cool);
+    const grayTimeline = buildLightingTimeline(analysis, "same-seed", false, gray);
+    expect(Array.from(warmTimeline.slice(15, 18))).not.toEqual(Array.from(coolTimeline.slice(15, 18)));
+    for (let frame = 0; frame < 60; frame++) for (const colorOffset of [8, 15, 23, 31]) {
+      const offset = frame * LIGHTING_TIMELINE_STRIDE + colorOffset;
+      expect(grayTimeline[offset]!).toBeCloseTo(grayTimeline[offset + 1]!, 6);
+      expect(grayTimeline[offset + 1]!).toBeCloseTo(grayTimeline[offset + 2]!, 6);
+    }
+    const profile = { title: "Track", artist: "Artist", duration: 1, fps: 60, frameCount: 60, stride: LIGHTING_TIMELINE_STRIDE, hasArtwork: true };
+    const warmHandler = createLightingPreviewHandler({ ...profile, palette: warm }, warmTimeline, new Map());
+    const coolHandler = createLightingPreviewHandler({ ...profile, palette: cool }, coolTimeline, new Map());
+    const warmResponse = await (await warmHandler(new Request("http://127.0.0.1/profile.json"))).json();
+    const coolResponse = await (await coolHandler(new Request("http://127.0.0.1/profile.json"))).json();
+    expect(warmResponse).not.toEqual(coolResponse);
   });
 
   test("uniform timeline is deterministic, finite, and carries distinct animated light positions", () => {

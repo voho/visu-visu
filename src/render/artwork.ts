@@ -4,6 +4,7 @@ import { createCanvas, loadImage, type Canvas, type SKRSContext2D } from "@napi-
 import { resolveArtworkPath } from "../config.js";
 import { clamp, smoothstep } from "../math/random.js";
 import { createSafeLayout } from "./layout.js";
+import { extractPalette, rgbHue, type ScenePalette } from "./palette.js";
 import type { MusicMotion } from "./music-motion.js";
 import { createMaterialFromRgba, type MaterialMap } from "./material.js";
 
@@ -15,6 +16,7 @@ export interface PreparedArtwork {
   height: number;
   accentHue: number;
   secondaryHue: number;
+  palette: ScenePalette;
   /** Luminance-derived shallow relief, with the same quiet-area masks. */
   material?: MaterialMap;
 }
@@ -37,42 +39,10 @@ export function deriveArtworkMotion(time: number, music?: MusicMotion): ArtworkM
   const treble = energy(music?.trebleEnergy);
   return {
     zoom: 1.018 + Math.sin(musicalTime * 0.075) * 0.009 + energy(music?.bassPulse) * 0.012,
-    hueShift: bass * -14 + mid * 5 + treble * 2.6,
+    hueShift: 0,
     saturation: 1 + bass * 0.045 + mid * 0.03 + treble * 0.015,
     opacity: 0.72 + energy(music?.sustain) * 0.09,
   };
-}
-
-function paletteFromPixels(pixels: Uint8ClampedArray): { accentHue: number; secondaryHue: number } {
-  const histogram = new Float64Array(24);
-  for (let index = 0; index < pixels.length; index += 4) {
-    const r = pixels[index]! / 255;
-    const g = pixels[index + 1]! / 255;
-    const b = pixels[index + 2]! / 255;
-    const maximum = Math.max(r, g, b);
-    const minimum = Math.min(r, g, b);
-    const chroma = maximum - minimum;
-    if (chroma < 0.08 || maximum < 0.1) continue;
-    let hue = maximum === r
-      ? ((g - b) / chroma) % 6
-      : maximum === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
-    hue = ((hue * 60) + 360) % 360;
-    const bin = Math.round(hue / 15) % histogram.length;
-    // Ignore transparent padding, near-black colors, and white highlight noise.
-    histogram[bin] = histogram[bin]! + chroma * maximum * pixels[index + 3]! / 255;
-  }
-  let dominant = -1;
-  for (let index = 0; index < histogram.length; index += 1) {
-    if (histogram[index]! > (dominant < 0 ? 0 : histogram[dominant]!)) dominant = index;
-  }
-  const accentHue = dominant < 0 ? 206 : dominant * 15;
-  let secondary = -1;
-  for (let index = 0; index < histogram.length; index += 1) {
-    const distance = Math.abs(index * 15 - accentHue);
-    if (Math.min(distance, 360 - distance) < 60) continue;
-    if (histogram[index]! > (secondary < 0 ? 0 : histogram[secondary]!)) secondary = index;
-  }
-  return { accentHue, secondaryHue: secondary < 0 ? (accentHue + 60) % 360 : secondary * 15 };
 }
 
 /**
@@ -111,6 +81,18 @@ export async function prepareArtwork(
     throw new Error(`Could not decode artwork ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  // Sample the whole source before the aspect-specific crop or quiet masks.
+  // Landscape/portrait exports therefore keep the same artist-chosen colors.
+  const paletteScale = Math.min(1, 256 / Math.max(source.width, source.height));
+  const paletteCanvas = createCanvas(Math.max(1, Math.round(source.width * paletteScale)), Math.max(1, Math.round(source.height * paletteScale)));
+  const paletteContext = paletteCanvas.getContext("2d");
+  paletteContext.drawImage(source, 0, 0, paletteCanvas.width, paletteCanvas.height);
+  const palette = extractPalette(paletteContext.getImageData(0, 0, paletteCanvas.width, paletteCanvas.height).data);
+  const colors = {
+    palette, accentHue: palette.anchorHue,
+    secondaryHue: rgbHue(palette.colors[1] ?? palette.colors[0] ?? [0.5, 0.5, 0.5]),
+  };
+
   const scale = Math.min(1, 512 / Math.max(width, height));
   const textureWidth = Math.max(16, Math.round(width * scale));
   const textureHeight = Math.max(16, Math.round(height * scale));
@@ -120,7 +102,6 @@ export async function prepareArtwork(
   const drawWidth = source.width * cover;
   const drawHeight = source.height * cover;
   rawContext.drawImage(source, (textureWidth - drawWidth) / 2, (textureHeight - drawHeight) / 2, drawWidth, drawHeight);
-  const colors = paletteFromPixels(rawContext.getImageData(0, 0, textureWidth, textureHeight).data);
 
   const canvas = createCanvas(textureWidth, textureHeight);
   const context = canvas.getContext("2d");
@@ -189,7 +170,7 @@ export function drawArtwork(
   context.save();
   context.globalCompositeOperation = "screen";
   context.globalAlpha = motion.opacity;
-  context.filter = `hue-rotate(${motion.hueShift}deg) saturate(${motion.saturation})`;
+  context.filter = `saturate(${motion.saturation})`;
   context.drawImage(artwork.canvas, (artwork.width - width) / 2, (artwork.height - height) / 2, width, height);
   context.restore();
 }

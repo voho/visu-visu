@@ -195,3 +195,29 @@ describe("FFT environment illumination", () => {
     expect(shadeSurface(invalid, 0, 0, 0, surface).every((value) => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true);
   });
 });
+
+
+test("artwork palette supplies every light and neutral artwork cannot acquire colored reflections", async () => {
+  const { extractPalette, rgbHue } = await import("../src/render/palette.js");
+  const { createMaterial, sampleMaterial } = await import("../src/render/material.js");
+  const motion = {
+    slowTime: 12, fastTime: 35, bassPulse: 0.8, treblePulse: 0.5,
+    bassEnergy: 0.8, midEnergy: 0.5, trebleEnergy: 0.3, attack: 0.8, sustain: 0.7,
+  };
+  const grayscale = extractPalette(new Uint8ClampedArray([40, 40, 40, 255, 160, 160, 160, 255]));
+  const orange = extractPalette(new Uint8ClampedArray([220, 100, 30, 255]));
+  const spectrum = new Float32Array(64).fill(0.8);
+  const material = sampleMaterial(createMaterial("blue-before-recolor", 16), 0.4, 0.6);
+  for (const phase of [-190, 0, 80, 360, 980]) {
+    const neutral = lightingAt(motion, 30, "neutral-cover", phase, false, spectrum, grayscale);
+    for (const rgb of [...neutral.lights.map((light) => light.color), neutral.ambient,
+      shadeSurface(neutral, 0.1, 0.2, 0.3, material)]) {
+      expect(rgb[0]).toBeCloseTo(rgb[1], 9);
+      expect(rgb[1]).toBeCloseTo(rgb[2], 9);
+    }
+    const source = lightingAt(motion, 30, "orange-cover", phase, false, spectrum, orange);
+    for (const rgb of [...source.lights.map((light) => light.color), source.ambient]) {
+      expect(rgbHue(rgb)).toBeCloseTo(orange.anchorHue, 6);
+    }
+  }
+});

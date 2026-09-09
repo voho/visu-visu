@@ -5,8 +5,9 @@ import { deriveMusicMotion, type MusicMotion } from "./music-motion.js";
 import { novaEventsAt, type SupernovaEvent } from "./supernova.js";
 import { FrozenCloudLayer } from "./frozen-cloud-layer.js";
 import { drawArtwork, deriveArtworkMotion, type PreparedArtwork } from "./artwork.js";
-import { createMaterial, type MaterialMap, type MaterialSample } from "./material.js";
+import { createMaterial, recolorMaterial, type MaterialMap, type MaterialSample } from "./material.js";
 import { lightingAt, shadeSurface, type Rgb } from "./lighting.js";
+import { paletteCss, paletteRgb, randomPalette, type ScenePalette } from "./palette.js";
 import { MaterialLightLayer } from "./material-layer.js";
 import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface } from "./surface-mesh.js";
@@ -98,26 +99,6 @@ interface Stardust {
   band: number;
 }
 
-function hsla(
-  hue: number,
-  saturation: number,
-  lightness: number,
-  alpha = 1,
-): string {
-  const normalizedHue = ((hue % 360) + 360) % 360;
-  return (
-    "hsla(" +
-    normalizedHue +
-    ", " +
-    clamp(saturation, 0, 100) +
-    "%, " +
-    clamp(lightness, 0, 100) +
-    "%, " +
-    clamp(alpha) +
-    ")"
-  );
-}
-
 function resetContext(
   context: SKRSContext2D,
   width: number,
@@ -130,16 +111,6 @@ function resetContext(
   context.shadowBlur = 0;
   context.shadowColor = "rgba(0,0,0,0)";
   context.clearRect(0, 0, width, height);
-}
-
-function hslRgb(hue: number, saturation: number, lightness: number, out: Rgb): void {
-  const h = ((hue % 360) + 360) % 360 / 30;
-  const a = saturation * Math.min(lightness, 1 - lightness);
-  const channel = (offset: number): number => {
-    const k = (h + offset) % 12;
-    return lightness - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  };
-  out[0] = channel(0); out[1] = channel(8); out[2] = channel(4);
 }
 
 export class VisualizerRenderer {
@@ -167,6 +138,7 @@ export class VisualizerRenderer {
   private readonly config: ProjectConfig;
   private readonly seed: string;
   private readonly palettePhase: number;
+  private readonly palette: ScenePalette;
   private readonly layout: SafeLayout;
   private readonly frozenClouds: FrozenCloudLayer;
   private readonly material: MaterialMap;
@@ -175,6 +147,11 @@ export class VisualizerRenderer {
   private readonly sceneAtmosphere: SceneAtmosphere;
   private backgroundCacheKey = "";
   private backgroundCacheAnalysis: AudioAnalysis | undefined;
+
+  /** Existing musical color phases select image swatches instead of rotating through unrelated hues. */
+  private color(phase: number, saturation: number, lightness: number, alpha = 1): string {
+    return paletteCss(this.palette, phase - this.palettePhase, saturation, lightness, alpha);
+  }
 
   constructor(
     config: ProjectConfig,
@@ -191,10 +168,11 @@ export class VisualizerRenderer {
     this.height = renderSize.height;
     this.backgroundWidth = Math.max(64, Math.round(this.width / 4));
     this.backgroundHeight = Math.max(40, Math.round(this.height / 4));
-    this.palettePhase = artwork?.accentHue ?? (184 + createRandom(deriveSeed(this.seed, "palette"))() * 40);
+    this.palette = artwork?.palette ?? randomPalette(seed);
+    this.palettePhase = this.palette.anchorHue;
     this.layout = createSafeLayout(this.width, this.height);
     this.frozenClouds = new FrozenCloudLayer(this.width, this.height, this.layout, this.seed);
-    this.material = createMaterial(seed);
+    this.material = recolorMaterial(createMaterial(seed), this.palette);
     this.materialLight = new MaterialLightLayer(this.width, this.height, this.material, this.layout);
     this.sceneAtmosphere = new SceneAtmosphere(this.width, this.height, this.layout, seed, config.visual.lowFlash);
     this.artworkLight = artwork?.material
@@ -373,7 +351,7 @@ export class VisualizerRenderer {
     context.clip();
     this.applyGraphCamera(context, frame, visual, choreography, time, effects);
     drawMaterialSurface(context, filaments, frame, motion, this.material,
-      lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum),
+      lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette),
       this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
     this.drawResonance(context, filaments, frame, visual, time, false, "back", motion, effects);
     context.save();
@@ -476,9 +454,9 @@ export class VisualizerRenderer {
     if (effects.dispersion > 0.015) {
       const offset = this.backgroundWidth * effects.dispersion * 0.0035;
       background.globalAlpha = effects.dispersion * 0.2;
-      background.filter = "blur(1.2px) hue-rotate(-28deg)";
+      background.filter = "blur(1.2px)";
       background.drawImage(this.emissionCanvas, -offset, 0);
-      background.filter = "blur(1.2px) hue-rotate(28deg)";
+      background.filter = "blur(1.2px)";
       background.drawImage(this.emissionCanvas, offset, 0);
     }
     background.filter = "blur(2.4px)";
@@ -529,7 +507,7 @@ export class VisualizerRenderer {
     // source geometry instead of applying the atmosphere's separate drift.
     if (this.artwork) drawArtwork(output, this.artwork, time, motion);
     const lightingStrength = this.config.visual.lighting ?? 0.65;
-    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum);
+    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette);
     this.sceneAtmosphere.draw(output, deriveSceneDynamics(analysis, time), lights);
     if (lightingStrength > 0) {
       this.materialLight.draw(output, lights, lightingStrength);
@@ -547,7 +525,7 @@ export class VisualizerRenderer {
       this.applyGraphCamera(context, frozenFrame, frozenVisual, frozenChoreography, captureTime, frozenEffects);
       drawMaterialSurface(context, frozenFilaments, frozenFrame, frozenMotion, this.material,
         lightingAt(frozenMotion, captureTime, this.seed, this.palettePhase + frozenEffects.hueShift,
-          this.config.visual.lowFlash, frozenFrame.spectrum), this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
+          this.config.visual.lowFlash, frozenFrame.spectrum, this.palette), this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
       this.drawResonance(context, frozenFilaments, frozenFrame, frozenVisual, captureTime,
         true, "back", frozenMotion, frozenEffects);
       this.drawResonance(context, frozenFilaments, frozenFrame, frozenVisual, captureTime,
@@ -587,9 +565,9 @@ export class VisualizerRenderer {
 
     resetContext(context, width, height);
     const base = context.createLinearGradient(0, 0, width, height);
-    base.addColorStop(0, hsla(228, 64, 3.5 * peakShade));
-    base.addColorStop(0.48, hsla(240, 58, 2.4 * peakShade));
-    base.addColorStop(1, hsla(252, 58, 5.5 * peakShade));
+    base.addColorStop(0, this.color(228, 64, 3.5 * peakShade));
+    base.addColorStop(0.48, this.color(240, 58, 2.4 * peakShade));
+    base.addColorStop(1, this.color(252, 58, 5.5 * peakShade));
     context.fillStyle = base;
     context.fillRect(0, 0, width, height);
 
@@ -605,7 +583,7 @@ export class VisualizerRenderer {
     );
     centralField.addColorStop(
       0,
-      hsla(
+      this.color(
         baseHue + 18,
         88,
         36,
@@ -614,7 +592,7 @@ export class VisualizerRenderer {
     );
     centralField.addColorStop(
       0.42,
-      hsla(baseHue + 94, 90, 24, 0.055 * peakShade * atmosphere),
+      this.color(baseHue + 94, 90, 24, 0.055 * peakShade * atmosphere),
     );
     centralField.addColorStop(1, "rgba(0,0,0,0)");
     context.save();
@@ -646,7 +624,7 @@ export class VisualizerRenderer {
       const cloud = context.createRadialGradient(0, 0, 0, 0, 0, radius);
       cloud.addColorStop(
         0,
-        hsla(
+        this.color(
           hue,
           92,
           54 + frame.mid * 14,
@@ -659,7 +637,7 @@ export class VisualizerRenderer {
       );
       cloud.addColorStop(
         0.38,
-        hsla(
+        this.color(
           hue + 24,
           90,
           32,
@@ -682,7 +660,7 @@ export class VisualizerRenderer {
     for (let index = 0; index < 4; index += 1) {
       const radiusX = width * (0.18 + index * 0.105);
       const radiusY = height * (0.11 + index * 0.065);
-      context.strokeStyle = hsla(
+      context.strokeStyle = this.color(
         baseHue + (index % 2 === 0 ? 12 : 96),
         88,
         52,
@@ -729,11 +707,11 @@ export class VisualizerRenderer {
       );
       glow.addColorStop(
         0,
-        hsla(baseHue + orb.hueOffset, 94, 72, alpha),
+        this.color(baseHue + orb.hueOffset, 94, 72, alpha),
       );
       glow.addColorStop(
         0.35,
-        hsla(baseHue + orb.hueOffset + 22, 92, 48, alpha * 0.34),
+        this.color(baseHue + orb.hueOffset + 22, 92, 48, alpha * 0.34),
       );
       glow.addColorStop(1, "rgba(0,0,0,0)");
       context.fillStyle = glow;
@@ -751,12 +729,12 @@ export class VisualizerRenderer {
     const wash = context.createLinearGradient(0, height, width, 0);
     const washAlpha =
       grade.washAlpha * (0.36 + choreography.layers.grade * 0.64);
-    wash.addColorStop(0, hsla(baseHue, 88, 42, washAlpha));
+    wash.addColorStop(0, this.color(baseHue, 88, 42, washAlpha));
     wash.addColorStop(
       0.55,
-      hsla(baseHue + 54, 86, 54, washAlpha * 0.35),
+      this.color(baseHue + 54, 86, 54, washAlpha * 0.35),
     );
-    wash.addColorStop(1, hsla(baseHue + 104, 90, 44, washAlpha));
+    wash.addColorStop(1, this.color(baseHue + 104, 90, 44, washAlpha));
     context.fillStyle = wash;
     context.fillRect(0, 0, width, height);
     context.restore();
@@ -802,7 +780,7 @@ export class VisualizerRenderer {
       this.palettePhase + effects.hueShift;
     coreGlow.addColorStop(
       0,
-      hsla(
+      this.color(
         coreHue,
         100,
         72,
@@ -812,7 +790,7 @@ export class VisualizerRenderer {
     );
     coreGlow.addColorStop(
       0.28,
-      hsla(coreHue + 54, 100, 52, 0.08 + visual.peak * 0.08),
+      this.color(coreHue + 54, 100, 52, 0.08 + visual.peak * 0.08),
     );
     coreGlow.addColorStop(1, "rgba(0,0,0,0)");
     context.fillStyle = coreGlow;
@@ -908,7 +886,7 @@ export class VisualizerRenderer {
       this.config.visual.intensity;
     const hue = this.palettePhase + effects.hueShift + Math.sin(time * 0.045) * 14;
     const lightingStrength = this.config.visual.lighting ?? 0.65;
-    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum);
+    const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette);
     const materialSample: MaterialSample = {r: 0, g: 0, b: 0, a: 1, nx: 0, ny: 0, nz: 1, roughness: 0.6, height: 0.5};
     const lightColor: Rgb = [0, 0, 0];
     const baseColor: Rgb = [0, 0, 0];
@@ -928,7 +906,7 @@ export class VisualizerRenderer {
       const offset = filament.hueOffset * 0.18;
       for (let stop = 0; stop < gradientStops.length; stop += 1) {
         const [, hueOffset, saturation, lightness] = gradientStops[stop]!;
-        hslRgb(hue + hueOffset + offset, saturation, lightness, gradientColors[stop]!);
+        paletteRgb(this.palette, hue + hueOffset + offset - this.palettePhase, saturation * 100, lightness * 100, gradientColors[stop]!);
       }
       context.lineWidth = emission
         ? Math.max(1.8, radius * (0.014 + frame.mid * 0.005))
@@ -994,7 +972,7 @@ export class VisualizerRenderer {
         if (point.depth < 0.5) continue;
         const x = lerp(point.x, next.x, position % 1);
         const y = lerp(point.y, next.y, position % 1);
-        context.fillStyle = hsla(hue + offset, 66, 91,
+        context.fillStyle = this.color(hue + offset, 66, 91,
           (0.28 + point.energy * 0.65) * presence);
         context.beginPath();
         context.arc(x, y, Math.max(0.65, radius * 0.005), 0, Math.PI * 2);
@@ -1031,11 +1009,11 @@ export class VisualizerRenderer {
         // resolution and passes through the same optical bloom as the sculpture.
         const glowRadius = radius * ((nova ? 0.3 : 0.16) + event.expansion * 1.15);
         const glow = context.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
-        glow.addColorStop(0, hsla(hue + 70, 98, 75,
+        glow.addColorStop(0, this.color(hue + 70, 98, 75,
           strength * (event.flash * 0.8 + event.afterglow * 0.12)));
-        glow.addColorStop(0.23, hsla(hue + 35, 100, 56, strength * event.afterglow * 0.22));
-        glow.addColorStop(0.65, hsla(hue - 24, 100, 42, strength * event.afterglow * 0.09));
-        glow.addColorStop(1, hsla(hue - 45, 100, 30, 0));
+        glow.addColorStop(0.23, this.color(hue + 35, 100, 56, strength * event.afterglow * 0.22));
+        glow.addColorStop(0.65, this.color(hue - 24, 100, 42, strength * event.afterglow * 0.09));
+        glow.addColorStop(1, this.color(hue - 45, 100, 30, 0));
         context.fillStyle = glow;
         context.fillRect(-glowRadius, -glowRadius, glowRadius * 2, glowRadius * 2);
 
@@ -1048,9 +1026,9 @@ export class VisualizerRenderer {
           context.save();
           context.rotate(angle);
           const beam = context.createLinearGradient(0, 0, length, 0);
-          beam.addColorStop(0, hsla(hue + 65, 86, 86, alpha));
-          beam.addColorStop(0.28, hsla(hue + 32, 100, 65, alpha * 0.7));
-          beam.addColorStop(1, hsla(hue - 20, 100, 50, 0));
+          beam.addColorStop(0, this.color(hue + 65, 86, 86, alpha));
+          beam.addColorStop(0.28, this.color(hue + 32, 100, 65, alpha * 0.7));
+          beam.addColorStop(1, this.color(hue - 20, 100, 50, 0));
           context.fillStyle = beam;
           context.beginPath();
           context.moveTo(0, 0);
@@ -1069,10 +1047,10 @@ export class VisualizerRenderer {
           const r = Math.max(0.01, reach * (shell ? 0.78 : 1));
           const alpha = strength * event.afterglow * (shell ? 0.16 : 0.42);
           const front = context.createLinearGradient(-r, 0, r, 0);
-          front.addColorStop(0, hsla(hue - 20, 100, 70, alpha));
-          front.addColorStop(0.35, hsla(hue + 45, 100, 86, alpha * 0.35));
-          front.addColorStop(0.7, hsla(hue + 110, 100, 72, alpha));
-          front.addColorStop(1, hsla(hue + 60, 100, 75, alpha * 0.2));
+          front.addColorStop(0, this.color(hue - 20, 100, 70, alpha));
+          front.addColorStop(0.35, this.color(hue + 45, 100, 86, alpha * 0.35));
+          front.addColorStop(0.7, this.color(hue + 110, 100, 72, alpha));
+          front.addColorStop(1, this.color(hue + 60, 100, 75, alpha * 0.2));
           context.strokeStyle = front;
           context.lineWidth = Math.max(0.65, radius * (0.004 + event.flash * 0.009));
           context.beginPath();
@@ -1093,7 +1071,7 @@ export class VisualizerRenderer {
           const textClearance = smoothstep(this.layout.graphTop - this.height * 0.035,
             this.layout.graphTop + this.height * 0.08, y + py);
           const alpha = event.afterglow * strength * textClearance * (0.4 + (particle % 4) * 0.15);
-          context.strokeStyle = hsla(hue + 80 - event.age * 45 + particle % 3 * 20, 95, 77, alpha);
+          context.strokeStyle = this.color(hue + 80 - event.age * 45 + particle % 3 * 20, 95, 77, alpha);
           context.lineWidth = Math.max(0.55, radius * (particle % 7 === 0 ? 0.008 : 0.0035));
           context.beginPath();
           context.moveTo(px, py);
@@ -1108,13 +1086,13 @@ export class VisualizerRenderer {
         const length = radius * (nova ? 2.8 : 1.1) * (0.65 + event.flare * 0.35);
         const flareAlpha = clamp(strength * event.flare * 1.45);
         const beam = context.createLinearGradient(-length, 0, length, 0);
-        beam.addColorStop(0, hsla(hue, 100, 65, 0));
-        beam.addColorStop(0.3, hsla(hue, 100, 65, flareAlpha * 0.16));
-        beam.addColorStop(0.48, hsla(hue + 50, 100, 82, flareAlpha * 0.6));
-        beam.addColorStop(0.5, hsla(hue + 50, 50, 98, flareAlpha));
-        beam.addColorStop(0.52, hsla(hue + 80, 100, 82, flareAlpha * 0.6));
-        beam.addColorStop(0.7, hsla(hue + 80, 100, 65, flareAlpha * 0.16));
-        beam.addColorStop(1, hsla(hue + 80, 100, 65, 0));
+        beam.addColorStop(0, this.color(hue, 100, 65, 0));
+        beam.addColorStop(0.3, this.color(hue, 100, 65, flareAlpha * 0.16));
+        beam.addColorStop(0.48, this.color(hue + 50, 100, 82, flareAlpha * 0.6));
+        beam.addColorStop(0.5, this.color(hue + 50, 50, 98, flareAlpha));
+        beam.addColorStop(0.52, this.color(hue + 80, 100, 82, flareAlpha * 0.6));
+        beam.addColorStop(0.7, this.color(hue + 80, 100, 65, flareAlpha * 0.16));
+        beam.addColorStop(1, this.color(hue + 80, 100, 65, 0));
         context.fillStyle = beam;
         const thickness = Math.max(0.85, radius * (0.005 + event.flash * 0.015));
         context.fillRect(-length, -thickness / 2, length * 2, thickness);
@@ -1122,7 +1100,7 @@ export class VisualizerRenderer {
         context.fillRect(-length, -thickness * 2, length * 2, thickness * 4);
         context.globalAlpha = 1;
         for (let ghost = 1; ghost <= (nova ? 3 : 1); ghost += 1) {
-          context.fillStyle = hsla(hue + ghost * 32, 100, 65, flareAlpha * 0.045);
+          context.fillStyle = this.color(hue + ghost * 32, 100, 65, flareAlpha * 0.045);
           context.beginPath();
           context.arc(length * (ghost * 0.19 - 0.48), 0,
             radius * (0.035 + ghost * 0.028), 0, Math.PI * 2);
@@ -1133,10 +1111,10 @@ export class VisualizerRenderer {
         const coreRadius = radius * (0.055 + event.flash * (nova ? 0.26 : 0.12));
         const coreLight = clamp(strength * event.flash * 2.2);
         const core = context.createRadialGradient(0, 0, 0, 0, 0, coreRadius);
-        core.addColorStop(0, hsla(hue + 65, 35, 98, coreLight));
-        core.addColorStop(0.13, hsla(hue + 65, 75, 89, coreLight * 0.8));
-        core.addColorStop(0.4, hsla(hue + 45, 100, 66, coreLight * 0.35));
-        core.addColorStop(1, hsla(hue, 100, 50, 0));
+        core.addColorStop(0, this.color(hue + 65, 35, 98, coreLight));
+        core.addColorStop(0.13, this.color(hue + 65, 75, 89, coreLight * 0.8));
+        core.addColorStop(0.4, this.color(hue + 45, 100, 66, coreLight * 0.35));
+        core.addColorStop(1, this.color(hue, 100, 50, 0));
         context.fillStyle = core;
         context.fillRect(-coreRadius, -coreRadius, coreRadius * 2, coreRadius * 2);
       }
@@ -1161,9 +1139,9 @@ export class VisualizerRenderer {
         this.layout.centerX - radius, this.layout.horizon,
         this.layout.centerX + radius, this.layout.horizon,
       );
-      gradient.addColorStop(0, hsla(this.palettePhase + effects.hueShift - 20, 100, 78, alpha));
-      gradient.addColorStop(0.5, hsla(this.palettePhase + effects.hueShift + 30, 100, 87, alpha * 0.4));
-      gradient.addColorStop(1, hsla(this.palettePhase + effects.hueShift + 70, 100, 78, alpha));
+      gradient.addColorStop(0, this.color(this.palettePhase + effects.hueShift - 20, 100, 78, alpha));
+      gradient.addColorStop(0.5, this.color(this.palettePhase + effects.hueShift + 30, 100, 87, alpha * 0.4));
+      gradient.addColorStop(1, this.color(this.palettePhase + effects.hueShift + 70, 100, 78, alpha));
       context.strokeStyle = gradient;
       context.lineWidth = Math.max(0.75, radius * (0.003 + motion.bassPulse * 0.005));
       context.beginPath();
@@ -1185,7 +1163,7 @@ export class VisualizerRenderer {
       for (let tail = 0; tail < 12; tail += 1) {
         const u = angle - direction * tail * 0.019;
         const v = u - direction * 0.023;
-        context.strokeStyle = hsla(hue, 94, 79, alpha * (1 - tail / 12) ** 1.7);
+        context.strokeStyle = this.color(hue, 94, 79, alpha * (1 - tail / 12) ** 1.7);
         context.lineWidth = Math.max(0.6, radius * (0.003 + response * 0.006));
         context.beginPath();
         context.moveTo(this.layout.centerX + Math.cos(u) * radius * reach * 1.62,
@@ -1194,7 +1172,7 @@ export class VisualizerRenderer {
           this.layout.horizon + Math.sin(v) * radius * reach * 0.73);
         context.stroke();
       }
-      context.fillStyle = hsla(hue, 65, 93, alpha);
+      context.fillStyle = this.color(hue, 65, 93, alpha);
       context.beginPath();
       context.arc(this.layout.centerX + Math.cos(angle) * radius * reach * 1.62,
         this.layout.horizon + Math.sin(angle) * radius * reach * 0.73,
@@ -1219,7 +1197,7 @@ export class VisualizerRenderer {
       const twinkle = 0.7 + Math.sin(time * 0.65 + dust.phase) * 0.3;
       const alpha = (0.055 + depth ** 3 * 0.3) * twinkle *
         (0.7 + energy * 0.5) * this.config.visual.intensity;
-      context.fillStyle = hsla(this.palettePhase + dust.phase * 12, 45, 82, alpha);
+      context.fillStyle = this.color(this.palettePhase + dust.phase * 12, 45, 82, alpha);
       const size = Math.max(0.35, dust.size * unit * (0.55 + depth));
       context.fillRect(x, y, size, size);
     }
@@ -1232,10 +1210,10 @@ export class VisualizerRenderer {
       const alpha = (0.012 + frame.mid * 0.012 + visual.drive * 0.012) *
         Math.sin(p * Math.PI) * this.config.visual.intensity;
       const gradient = context.createLinearGradient(0, this.height, this.width, 0);
-      gradient.addColorStop(0, hsla(this.palettePhase, 88, 55, 0));
-      gradient.addColorStop(0.35, hsla(this.palettePhase - 20, 90, 61, alpha));
-      gradient.addColorStop(0.65, hsla(this.palettePhase + 65, 90, 63, alpha));
-      gradient.addColorStop(1, hsla(this.palettePhase + 80, 90, 55, 0));
+      gradient.addColorStop(0, this.color(this.palettePhase, 88, 55, 0));
+      gradient.addColorStop(0.35, this.color(this.palettePhase - 20, 90, 61, alpha));
+      gradient.addColorStop(0.65, this.color(this.palettePhase + 65, 90, 63, alpha));
+      gradient.addColorStop(1, this.color(this.palettePhase + 80, 90, 55, 0));
       context.strokeStyle = gradient;
       context.lineWidth = Math.max(0.5, unit * 1.2);
       context.beginPath();
@@ -1291,7 +1269,7 @@ export class VisualizerRenderer {
 
       const hue = this.palettePhase + pose.hue + time * 0.45;
       if (pose.trail > 0.12) {
-        context.strokeStyle = hsla(
+        context.strokeStyle = this.color(
           hue,
           94,
           74,
@@ -1304,7 +1282,7 @@ export class VisualizerRenderer {
         context.stroke();
       }
 
-      context.fillStyle = hsla(hue, 94, 84, alpha);
+      context.fillStyle = this.color(hue, 94, 84, alpha);
       context.beginPath();
       context.arc(
         pose.x,
@@ -1320,7 +1298,7 @@ export class VisualizerRenderer {
         smoothstep(0.5, 0.7, pose.depth);
       if (crossPresence > 0.01) {
         const cross = pose.size * (1.8 + pose.energy);
-        context.strokeStyle = hsla(
+        context.strokeStyle = this.color(
           hue + 18,
           100,
           88,
@@ -1368,7 +1346,7 @@ export class VisualizerRenderer {
           smoothstep(0.36, 0.58, ring.depth);
 
       if (breakMix < 0.98) {
-        context.strokeStyle = hsla(
+        context.strokeStyle = this.color(
           hue,
           96,
           emission ? 62 : 72,
@@ -1388,7 +1366,7 @@ export class VisualizerRenderer {
       }
 
       if (breakMix > 0.01) {
-        context.strokeStyle = hsla(hue + 18, 98, 76, alpha * breakMix);
+        context.strokeStyle = this.color(hue + 18, 98, 76, alpha * breakMix);
         const phase = ring.lane * Math.PI * 2;
         for (let arc = 0; arc < 3; arc += 1) {
           const start = phase + arc * (Math.PI * 2 / 3) + 0.16;
@@ -1430,7 +1408,7 @@ export class VisualizerRenderer {
         (0.08 + point.emission * 0.19 + visual.peak * 0.08) *
         presence *
         this.config.visual.intensity;
-      context.strokeStyle = hsla(
+      context.strokeStyle = this.color(
         this.palettePhase + point.hue + time * 0.42,
         100,
         62,
@@ -1483,7 +1461,7 @@ export class VisualizerRenderer {
         (point.hue + next.hue) * 0.5 +
         time * 0.42;
 
-      context.fillStyle = hsla(
+      context.fillStyle = this.color(
         hue,
         pass === "front" ? 98 : 86,
         lightness,
@@ -1498,7 +1476,7 @@ export class VisualizerRenderer {
       context.fill();
 
       if (pass === "front") {
-        context.strokeStyle = hsla(
+        context.strokeStyle = this.color(
           hue + 18,
           100,
           83,
@@ -1548,7 +1526,7 @@ export class VisualizerRenderer {
       const progress = stop / 8;
       gradient.addColorStop(
         progress,
-        hsla(
+        this.color(
           this.palettePhase +
             this.ribbonPlan.hue +
             (progress - 0.5) * spread +
@@ -1591,7 +1569,7 @@ export class VisualizerRenderer {
       const radius =
         Math.max(0.7, this.width / 2200) *
         (0.7 + point.energy * 1.5 + visual.peak * 0.45);
-      context.fillStyle = hsla(
+      context.fillStyle = this.color(
         this.palettePhase + point.hue + time * 0.42,
         100,
         88,
@@ -1644,9 +1622,9 @@ export class VisualizerRenderer {
       const endY = point.y + Math.sin(direction) * radii.y * length;
       const hue = this.palettePhase + point.hue + time * 0.42;
       const flare = context.createLinearGradient(startX, startY, endX, endY);
-      flare.addColorStop(0, hsla(hue, 100, 90, 0.42 * presence));
-      flare.addColorStop(0.35, hsla(hue + 18, 100, 76, 0.24 * presence));
-      flare.addColorStop(1, hsla(hue + 42, 100, 62, 0));
+      flare.addColorStop(0, this.color(hue, 100, 90, 0.42 * presence));
+      flare.addColorStop(0.35, this.color(hue + 18, 100, 76, 0.24 * presence));
+      flare.addColorStop(1, this.color(hue + 42, 100, 62, 0));
       context.strokeStyle = flare;
       context.lineWidth =
         Math.max(0.5, this.width / 2100) *
@@ -1705,7 +1683,7 @@ export class VisualizerRenderer {
         const x = this.layout.centerX + Math.cos(angle) * radius * travel * 1.65;
         const y = this.layout.horizon + Math.sin(angle) * radius * travel * 0.8;
         const length = radius * (0.008 + progress * 0.012) * (0.6 + visual.peak);
-        context.strokeStyle = hsla(this.palettePhase + spark * 6, 86, 86,
+        context.strokeStyle = this.color(this.palettePhase + spark * 6, 86, 86,
           envelope * strength * 1.7 * this.config.visual.intensity);
         context.lineWidth = Math.max(0.5, radius * 0.004);
         context.beginPath();
@@ -1770,10 +1748,10 @@ export class VisualizerRenderer {
         endX,
         endY,
       );
-      beam.addColorStop(0, hsla(hue, 100, 76, 0));
-      beam.addColorStop(0.16, hsla(hue, 100, 72, alpha));
-      beam.addColorStop(0.72, hsla(hue + 34, 100, 58, alpha * 0.24));
-      beam.addColorStop(1, hsla(hue + 54, 100, 54, 0));
+      beam.addColorStop(0, this.color(hue, 100, 76, 0));
+      beam.addColorStop(0.16, this.color(hue, 100, 72, alpha));
+      beam.addColorStop(0.72, this.color(hue + 34, 100, 58, alpha * 0.24));
+      beam.addColorStop(1, this.color(hue + 54, 100, 54, 0));
       context.fillStyle = beam;
       context.beginPath();
       context.moveTo(centerX, centerY);
@@ -1821,7 +1799,7 @@ export class VisualizerRenderer {
         (1 - progress) *
         (emission ? 0.34 : 0.22) *
         this.config.visual.intensity;
-      target.strokeStyle = hsla(hue, 100, emission ? 64 : 82, alpha);
+      target.strokeStyle = this.color(hue, 100, emission ? 64 : 82, alpha);
       target.lineWidth =
         Math.max(0.65, this.width / 1700) *
         (emission ? 6 : 1) *
@@ -1887,10 +1865,10 @@ export class VisualizerRenderer {
       0,
       safeY + baseTitleSize * 1.25,
     );
-    titleGradient.addColorStop(0, "rgba(255,255,255,0.98)");
+    titleGradient.addColorStop(0, this.color(this.palettePhase, 12, 99, 0.98));
     titleGradient.addColorStop(
       1,
-      hsla(
+      this.color(
         this.palettePhase + this.ribbonPlan.hue + grade.hueShift,
         18,
         94,
@@ -1911,7 +1889,7 @@ export class VisualizerRenderer {
     if (artist) {
       context.filter = "none";
       context.shadowBlur = Math.min(4, this.width * 0.0022);
-      context.fillStyle = "rgba(244,246,255,0.96)";
+      context.fillStyle = this.color(this.palettePhase + 72, 16, 96, 0.96);
       const artistY = title ? safeY + rise + titleSize * 1.12 : safeY + rise;
       this.drawFittedText(
         context,

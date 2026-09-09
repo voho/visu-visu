@@ -94,6 +94,28 @@ describe("artwork preparation", () => {
     });
   }
 
+  test("extracts the same full-image palette before portrait or landscape cropping", async () => {
+    const source = createCanvas(800, 160);
+    const context = source.getContext("2d");
+    context.fillStyle = "#d8328f";
+    context.fillRect(0, 0, 400, 160);
+    context.fillStyle = "#1faf60";
+    context.fillRect(400, 0, 400, 160);
+    // A portrait crop sees primarily this pale center; extraction must still
+    // retain the saturated edge colors from the artist's complete cover.
+    context.fillStyle = "#dddddd";
+    context.fillRect(325, 0, 150, 160);
+    const path = join(directory, "full-source-palette.png");
+    await writeFile(path, source.toBuffer("image/png"));
+    const portrait = (await prepareArtwork(path, 360, 640))!;
+    const landscape = (await prepareArtwork(path, 640, 360))!;
+    expect(portrait.palette).toEqual(landscape.palette);
+    const swatches = portrait.palette.colors.map((rgb) => rgb.map((value) => Math.round(value * 255)));
+    expect(swatches).toContainEqual([216, 50, 143]);
+    expect(swatches).toContainEqual([31, 175, 96]);
+    expect(swatches).toContainEqual([221, 221, 221]);
+  });
+
   test("adds a feathered artwork vignette independently of the scene", async () => {
     const source = createCanvas(640, 360);
     const context = source.getContext("2d");
@@ -154,7 +176,7 @@ describe("artwork preparation", () => {
     expect(brightnessDifference / (360 * 640 * 3)).toBeLessThan(0.5);
   });
 
-  test("uses stronger bass tint than treble while bounding color and beat response", () => {
+  test("preserves source hues while bass has stronger saturation and beat response", () => {
     const silent: MusicMotion = {
       slowTime: 10, fastTime: 20, bassPulse: 0, treblePulse: 0,
       bassEnergy: 0, midEnergy: 0, trebleEnergy: 0, attack: 0, sustain: 0,
@@ -164,12 +186,14 @@ describe("artwork preparation", () => {
     expect(neutral.saturation).toBe(1);
     const bass = deriveArtworkMotion(20, { ...silent, bassEnergy: 1 });
     const treble = deriveArtworkMotion(20, { ...silent, trebleEnergy: 1 });
-    expect(Math.abs(bass.hueShift)).toBeGreaterThan(Math.abs(treble.hueShift) * 4);
+    expect(bass.hueShift).toBe(0);
+    expect(treble.hueShift).toBe(0);
+    expect(bass.saturation - 1).toBeGreaterThan((treble.saturation - 1) * 2.5);
     const loud = deriveArtworkMotion(20, {
       ...silent, bassPulse: 100, bassEnergy: 100, midEnergy: 100, trebleEnergy: 100, sustain: 100,
     });
     expect(loud.saturation).toBeLessThanOrEqual(1.1);
-    expect(Math.abs(loud.hueShift)).toBeLessThanOrEqual(20);
+    expect(loud.hueShift).toBe(0);
     expect(loud.zoom).toBeLessThan(1.04);
     expect(loud.opacity).toBeLessThanOrEqual(0.81);
     expect(deriveArtworkMotion(20, { ...silent, bassPulse: 1 }).opacity).toBe(deriveArtworkMotion(20, silent).opacity);

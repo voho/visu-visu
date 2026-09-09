@@ -1,5 +1,6 @@
 import { hashString } from "../math/random.js";
 import type { MusicMotion } from "./music-motion.js";
+import { paletteRgb, randomPalette, type ScenePalette } from "./palette.js";
 
 export type Rgb = [number, number, number];
 export type Vec3 = [number, number, number];
@@ -19,6 +20,8 @@ export interface LightingState {
   exposure: number;
   /** Optional reflected FFT strip: the spectrum is itself a colored light. */
   spectrum?: SpectrumStripLight;
+  /** Supplies every decorative light color, including neutral artwork palettes. */
+  palette?: ScenePalette;
 }
 
 export interface SpectrumStripLight {
@@ -43,14 +46,6 @@ export interface SurfaceSample {
 
 function bounded(value: number, min = 0, max = 1, fallback = 0): number {
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
-}
-
-function tint(hue: number, saturation: number): Rgb {
-  const channel = (offset: number): number => {
-    const h = ((hue / 60 + offset) % 6 + 6) % 6;
-    return 1 - saturation * Math.max(0, Math.min(h, 4 - h, 1));
-  };
-  return [channel(5), channel(3), channel(1)];
 }
 
 /** Per-frame preparation only; surface shading samples this strip in O(1). */
@@ -107,6 +102,7 @@ export function lightingAt(
   paletteHue: number,
   lowFlash = false,
   spectrum?: Float32Array,
+  palette: ScenePalette = randomPalette(seed),
 ): LightingState {
   const safeTime = bounded(time, 0, 1e9);
   const slow = bounded(motion.slowTime, 0, 1e9, safeTime * 0.2);
@@ -119,7 +115,7 @@ export function lightingAt(
   const treblePulse = bounded(motion.treblePulse);
   const accent = lowFlash ? 0.18 : 1;
   const phase = hashString(`${seed}:material-lights`) / 0x100000000 * Math.PI * 2;
-  const hue = bounded(paletteHue, -1e9, 1e9);
+  const hue = bounded(paletteHue, -1e9, 1e9) - palette.anchorHue;
   const keyAngle = phase + slow * 0.27;
   const fillAngle = phase * 1.7 - slow * 0.19;
   const rimAngle = phase * 0.7 + fast * 0.43;
@@ -129,24 +125,25 @@ export function lightingAt(
     lights: [
       {
         position: [Math.cos(keyAngle) * keyRadius, Math.sin(keyAngle * 0.83) * keyRadius, 1.05 + bassPulse * 0.3],
-        color: tint(hue - 18 + bass * 18, 0.62),
+        color: paletteRgb(palette, hue - 18 + bass * 18, 100, 67),
         intensity: 0.22 + bass * 1.15 + bassPulse * 1.1 * accent,
         falloff: 0.4,
       },
       {
         position: [Math.cos(fillAngle) * 0.74, Math.sin(fillAngle) * 0.68, 1.3],
-        color: tint(hue + 84 + mids * 24, 0.72),
+        color: paletteRgb(palette, hue + 120 + mids * 24, 100, 63),
         intensity: 0.12 + mids * 0.52 + sustain * 0.13,
         falloff: 0.5,
       },
       {
         position: [Math.cos(rimAngle) * 0.93, Math.sin(rimAngle) * 0.86, 0.38 + treble * 0.1],
-        color: tint(hue + 174 + treble * 16, 0.46),
+        color: paletteRgb(palette, hue + 240 + treble * 16, 82, 72),
         intensity: 0.065 + treble * 0.23 + treblePulse * 0.2 * accent,
         falloff: 0.85,
       },
     ],
-    ambient: [0.075 + sustain * 0.016, 0.083 + sustain * 0.016, 0.105 + sustain * 0.018],
+    ambient: paletteRgb(palette, hue + 30, 55, 64).map((value) => value * (0.105 + sustain * 0.018)) as Rgb,
+    palette,
     exposure: 1.16 + sustain * 0.1,
   };
   if (spectrum) {
@@ -187,9 +184,12 @@ export function shadeSurface(
     ny = 0;
     nz = 1;
   }
-  const albedoR = bounded(sample.r);
-  const albedoG = bounded(sample.g);
-  const albedoB = bounded(sample.b);
+  // Scalar reflectance keeps palette-colored pigment/light multiplication from
+  // inventing new hues. Source lighting supplies chroma; relief keeps its detail.
+  const reflectance = bounded(sample.r) * 0.2126 + bounded(sample.g) * 0.7152 + bounded(sample.b) * 0.0722;
+  const albedoR = state.palette ? reflectance : bounded(sample.r);
+  const albedoG = state.palette ? reflectance : bounded(sample.g);
+  const albedoB = state.palette ? reflectance : bounded(sample.b);
   const roughness = bounded(sample.roughness, 0.08, 1, 0.65);
   const exponent = 4 + (1 - roughness) ** 2 * 92;
   const gloss = 0.15 + (1 - roughness) * 0.45;
