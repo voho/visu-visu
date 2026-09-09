@@ -8,6 +8,7 @@ import { deriveMusicMotion } from "../render/music-motion.js";
 import { lightingAt } from "../render/lighting.js";
 import { surfaceFeatureSamples, SURFACE_FEATURE_BANDS } from "../render/surface-signal.js";
 import { deriveSceneDynamics, SCENE_LAYER_NAMES } from "../render/scene-dynamics.js";
+import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME, type FrozenCloudCapture, type FrozenCloudEvent } from "../render/frozen-cloud.js";
 import type { AudioAnalysis } from "../types.js";
 
 export const LIGHTING_FEATURE_BANDS = SURFACE_FEATURE_BANDS;
@@ -58,6 +59,24 @@ export interface LightingPreviewProfile {
   stride: number;
   hasArtwork: boolean;
   lowFlash?: boolean;
+  ghosts?: LightingGhostSchedule;
+}
+
+export interface LightingGhostSchedule {
+  lifetime: number;
+  envelopeFps: number;
+  events: readonly FrozenCloudCapture[];
+  envelope: Array<Pick<FrozenCloudEvent, "scale" | "opacity" | "blur" | "dissolve">>;
+}
+
+/** The browser samples the exact shared optical curve instead of reimplementing it. */
+export function buildLightingGhostSchedule(analysis: AudioAnalysis): LightingGhostSchedule {
+  const envelopeFps = 30;
+  const envelope = Array.from({ length: Math.ceil(FROZEN_CLOUD_LIFETIME * envelopeFps) + 1 }, (_, index) => {
+    const event = frozenCloudAt({ id: 0, captureTime: 0, strength: 1 }, Math.min(index / envelopeFps, FROZEN_CLOUD_LIFETIME - 1e-8))!;
+    return { scale: event.scale, opacity: index / envelopeFps >= FROZEN_CLOUD_LIFETIME ? 0 : event.opacity, blur: event.blur, dissolve: event.dissolve };
+  });
+  return { lifetime: FROZEN_CLOUD_LIFETIME, envelopeFps, events: frozenCloudPlan(analysis), envelope };
 }
 
 /** Compact deterministic uniforms; playback/seek time comes from the audio element. */
@@ -182,6 +201,7 @@ async function main(): Promise<void> {
     ["/", resolve(import.meta.dir, "lighting.html")],
     ["/lighting.js", resolve(import.meta.dir, "lighting.js")],
     ["/lighting-mesh.js", resolve(import.meta.dir, "lighting-mesh.js")],
+    ["/lighting-ghosts.js", resolve(import.meta.dir, "lighting-ghosts.js")],
     ["/audio", options.audioPath],
     ["/albedo.png", resolve(import.meta.dir, "../../assets/materials/silk-albedo.png")],
     ["/normal.png", resolve(import.meta.dir, "../../assets/materials/silk-normal.png")],
@@ -193,7 +213,7 @@ async function main(): Promise<void> {
     title: options.title ?? tags.title ?? basename(options.audioPath, extname(options.audioPath)),
     artist: options.artist ?? tags.artist ?? "", duration: analysis.duration,
     fps: analysis.fps, frameCount: analysis.frames.length, stride: LIGHTING_TIMELINE_STRIDE,
-    hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash,
+    hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
   };
   const server = Bun.serve({ hostname: "127.0.0.1", port: options.port, fetch: createLightingPreviewHandler(profile, timeline, files) });
   console.log(`Live resonance preview: ${server.url}\n${profile.title}${profile.artist ? ` — ${profile.artist}` : ""}\nPress Ctrl+C to stop.`);

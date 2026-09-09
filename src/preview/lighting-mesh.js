@@ -11,7 +11,6 @@ uniform vec4 uMotion;
 uniform vec4 uClock;
 uniform vec4 uDynamics[3];
 uniform sampler2D uFeatures;
-uniform float uTrail;
 varying vec3 vPosition;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -23,8 +22,8 @@ vec2 feature(float x) { ${vertexFeatures ? 'float wave=texture2D(uFeatures,vec2(
 vec3 form(vec2 parameter) {
   float u=parameter.x*TAU;
   float phase=parameter.y*TAU;
-  float slow=uClock.x-uTrail*0.45;
-  float fast=uClock.y-uTrail*0.8;
+  float slow=uClock.x;
+  float fast=uClock.y;
   float bass=uMotion.x;
   float mids=uMotion.y;
   float treble=uMotion.z;
@@ -79,7 +78,7 @@ void main() {
   float size=min(uResolution.x,uResolution.y)*(aspect<1.0?0.432:0.338)*zoom;
   float perspective=3.8/(3.8-p.z);
   vec2 cameraDrift=vec2(sin(uDynamics[0].y*0.17),cos(uDynamics[0].y*0.13))*uDynamics[0].x*0.005;
-  vec2 pixel=uResolution*(vec2(0.5,aspect<1.0?0.59:0.635)+cameraDrift)+p.xy*size*perspective*(1.0+uTrail*0.04);
+  vec2 pixel=uResolution*(vec2(0.5,aspect<1.0?0.59:0.635)+cameraDrift)+p.xy*size*perspective;
   gl_Position=vec4(pixel/uResolution*2.0-1.0,-p.z*0.35,1.0);
 }
 `;
@@ -101,7 +100,6 @@ uniform sampler2D uStrip;
 uniform vec3 uStripState;
 uniform float uPass;
 uniform float uView;
-uniform float uTrail;
 varying vec3 vPosition;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -173,11 +171,7 @@ void main() {
   else color=vec3(roughness);
   gl_FragColor=vec4(color,1.0);return;
  }
- if(uPass>1.5) {
-  float facing=abs(dot(normal,normalize(vec3(0.0,0.0,3.4)-vPosition)));
-  float cloud=(0.009+uDynamics[0].z*0.016)*(0.35+pow(1.0-facing,1.5)*0.65);
-  gl_FragColor=vec4(mix(color,uLightColor[1],0.35),cloud);
- } else if(uPass<0.5) {
+ if(uPass<0.5) {
   float facing=abs(dot(normal,normalize(vec3(0.0,0.0,3.4)-vPosition)));
   float alpha=(0.20+pow(1.0-facing,2.0)*0.19)*(0.7+vEnergy*0.3);
   gl_FragColor=vec4(color*0.8,alpha);
@@ -186,7 +180,7 @@ void main() {
   vec3 tint=mix(uLightColor[0],uLightColor[1],0.5+sin(vUv.y*TAU+uClock.x*0.15)*0.5);
   float light=0.32+vEnergy*0.24+tracer*(0.25+uMotion.z*0.55);
   color=mix(color,tint,0.64)*light;
-  gl_FragColor=vec4(color,uTrail>0.0?0.045:0.50);
+  gl_FragColor=vec4(color,0.50);
  }
 }
 `;
@@ -229,7 +223,7 @@ void main() {
     gl.uniform4fv(uniform('uDynamics[0]'),values.subarray(135,147));
     gl.uniform3f(uniform('uAmbient'),values[8],values[9],values[10]);gl.uniform1f(uniform('uExposure'),values[11]);
     gl.uniform3f(uniform('uStripState'),values[132],values[133],values[134]);
-    gl.uniform1f(uniform('uView'),mode);gl.uniform1f(uniform('uPass'),0);gl.uniform1f(uniform('uTrail'),0);
+    gl.uniform1f(uniform('uView'),mode);gl.uniform1f(uniform('uPass'),0);
     for(let i=0;i<3;i++) {const offset=12+i*8;for(let j=0;j<3;j++){positions[i*3+j]=values[offset+j];colors[i*3+j]=values[offset+3+j];}powers[i*2]=values[offset+6];powers[i*2+1]=values[offset+7];}
     gl.uniform3fv(uniform('uLightPosition[0]'),positions);gl.uniform3fv(uniform('uLightColor[0]'),colors);gl.uniform2fv(uniform('uLightPower[0]'),powers);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,surfaceBuffer);
@@ -238,14 +232,10 @@ void main() {
       gl.clear(gl.DEPTH_BUFFER_BIT);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
     } else {
       gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-      gl.uniform1f(uniform('uTrail'),1.5);gl.uniform1f(uniform('uPass'),2);
-      gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
-      gl.uniform1f(uniform('uTrail'),0);gl.uniform1f(uniform('uPass'),0);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
       gl.enable(gl.CULL_FACE);gl.cullFace(gl.FRONT);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
       gl.cullFace(gl.BACK);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);gl.disable(gl.CULL_FACE);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuffer);gl.uniform1f(uniform('uPass'),1);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
       gl.drawElements(gl.LINES,lines.length,gl.UNSIGNED_SHORT,0);
-      gl.uniform1f(uniform('uTrail'),1);gl.drawElements(gl.LINES,lines.length,gl.UNSIGNED_SHORT,0);
     }
     gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);gl.depthMask(true);
   };

@@ -545,6 +545,9 @@ export class VisualizerRenderer {
         this.layout, captureTime, this.config.visual.lowFlash, frozenMotion);
       context.save();
       this.applyGraphCamera(context, frozenFrame, frozenVisual, frozenChoreography, captureTime, frozenEffects);
+      drawMaterialSurface(context, frozenFilaments, frozenFrame, frozenMotion, this.material,
+        lightingAt(frozenMotion, captureTime, this.seed, this.palettePhase + frozenEffects.hueShift,
+          this.config.visual.lowFlash, frozenFrame.spectrum), this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
       this.drawResonance(context, frozenFilaments, frozenFrame, frozenVisual, captureTime,
         true, "back", frozenMotion, frozenEffects);
       this.drawResonance(context, frozenFilaments, frozenFrame, frozenVisual, captureTime,

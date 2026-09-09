@@ -17,26 +17,26 @@ export interface FrozenCloudEvent {
   dissolve: number;
 }
 
-interface PlannedCloud {
+export interface FrozenCloudCapture {
   id: number;
   captureTime: number;
   strength: number;
 }
 
-const LIFETIME = 6;
-const REFRACTORY = 2.8;
+export const FROZEN_CLOUD_LIFETIME = 7.5;
+const REFRACTORY = 3;
 const FLUX_FLOOR = 0.006;
 const REFERENCE_FLOOR = 0.018;
-const plans = new WeakMap<AudioAnalysis, readonly PlannedCloud[]>();
+const plans = new WeakMap<AudioAnalysis, readonly FrozenCloudCapture[]>();
 
 function positive(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function planFor(analysis: AudioAnalysis): readonly PlannedCloud[] {
+export function frozenCloudPlan(analysis: AudioAnalysis): readonly FrozenCloudCapture[] {
   const cached = plans.get(analysis);
   if (cached) return cached;
-  const events: PlannedCloud[] = [];
+  const events: FrozenCloudCapture[] = [];
   const fps = Number.isFinite(analysis.fps) && analysis.fps > 0 ? analysis.fps : 30;
   const refractoryFrames = Math.ceil(REFRACTORY * fps);
   const referenceDecay = Math.exp(-1 / (fps * 8));
@@ -67,37 +67,46 @@ function planFor(analysis: AudioAnalysis): readonly PlannedCloud[] {
 
 /**
  * Sparse bass-triggered snapshots, evaluated from absolute song time. Captures
- * are at least 2.8 seconds apart and live for 6 seconds, naturally limiting the
+ * are at least 3 seconds apart and live for 7.5 seconds, naturally limiting the
  * renderer to three clouds without abruptly evicting a fading snapshot. Only
  * expansion, blur, opacity, and fixed-mask dissolution evolve after capture.
  */
 export function cloudEventsAt(analysis: AudioAnalysis, time: number): FrozenCloudEvent[] {
   if (!Number.isFinite(time) || time < 0) return [];
-  const events = planFor(analysis);
+  const events = frozenCloudPlan(analysis);
   let left = 0;
   let right = events.length;
   while (left < right) {
     const middle = Math.floor((left + right) / 2);
-    if (events[middle]!.captureTime <= time - LIFETIME) left = middle + 1;
+    if (events[middle]!.captureTime + FROZEN_CLOUD_LIFETIME <= time) left = middle + 1;
     else right = middle;
   }
   const result: FrozenCloudEvent[] = [];
   for (let index = left; index < events.length; index += 1) {
     const event = events[index]!;
     if (event.captureTime > time) break;
-    const age = time - event.captureTime;
-    if (age >= LIFETIME) continue;
-    const progress = clamp(age / LIFETIME);
-    const endFade = 1 - smoothstep(LIFETIME * 0.7, LIFETIME, age);
-    result.push({
-      ...event,
-      age,
-      scale: 1 + progress * 0.7,
-      opacity: 0.095 * event.strength * smoothstep(0, 0.42, age) *
-        Math.exp(-Math.max(0, age - 0.42) / 3.8) * endFade,
-      blur: 0.014 + 0.116 * smoothstep(0, 1, progress),
-      dissolve: smoothstep(0.3, LIFETIME, age),
-    });
+    const pose = frozenCloudAt(event, time);
+    if (pose) result.push(pose);
   }
   return result;
+}
+
+/** Optical history only: the captured object never resamples live music. */
+export function frozenCloudAt(event: FrozenCloudCapture, time: number): FrozenCloudEvent | undefined {
+  const age = time - event.captureTime;
+  if (!Number.isFinite(age) || age < 0 || time >= event.captureTime + FROZEN_CLOUD_LIFETIME) return undefined;
+  const progress = clamp(age / FROZEN_CLOUD_LIFETIME);
+  const endFade = 1 - smoothstep(FROZEN_CLOUD_LIFETIME * 0.72, FROZEN_CLOUD_LIFETIME, age);
+  return {
+    ...event, age,
+    // Constant motion in depth gives a gentle perspective approach. The
+    // snapshot passes from its original plane toward the viewer without
+    // rotating, changing shape, or reaching the camera's near plane.
+    scale: 1 / (1 - progress * 0.54),
+    opacity: 0.14 * event.strength * smoothstep(0, 0.6, age)
+      * Math.exp(-Math.max(0, age - 0.6) / 4.2) * endFade,
+    // A recognizable ghost remains for the first second before turning to fog.
+    blur: 0.006 + 0.114 * smoothstep(1.1, FROZEN_CLOUD_LIFETIME, age),
+    dissolve: smoothstep(1.1, FROZEN_CLOUD_LIFETIME, age),
+  };
 }

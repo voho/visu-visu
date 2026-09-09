@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { cloudEventsAt, type FrozenCloudEvent } from "../src/render/frozen-cloud.js";
+import {
+  cloudEventsAt, FROZEN_CLOUD_LIFETIME, frozenCloudAt, frozenCloudPlan,
+  type FrozenCloudEvent,
+} from "../src/render/frozen-cloud.js";
 import { ANALYSIS_VERSION, type AnalysisFrame, type AudioAnalysis } from "../src/types.js";
 
 function frame(overrides: Partial<AnalysisFrame> = {}): AnalysisFrame {
@@ -39,28 +42,60 @@ describe("frozen shape cloud events", () => {
   test("keeps capture identity fixed while snapshots slowly grow, blur, dissolve, and fade", () => {
     const source = singleHit();
     const initial = cloudAt(source, 0);
-    const samples = Array.from({ length: 360 }, (_, index) => cloudAt(source, index / 60));
+    const samples = Array.from({ length: FROZEN_CLOUD_LIFETIME * 60 }, (_, index) => cloudAt(source, index / 60));
     for (let index = 0; index < samples.length; index += 1) {
       const current = samples[index]!;
       expect(current.id).toBe(initial.id);
       expect(current.captureTime).toBe(initial.captureTime);
       expect(current.strength).toBe(initial.strength);
-      expect(current.opacity).toBeWithin(0, 0.095);
+      expect(current.opacity).toBeGreaterThanOrEqual(0);
+      expect(current.opacity).toBeLessThanOrEqual(0.14);
       if (index === 0) continue;
       const previous = samples[index - 1]!;
-      expect(current.scale - previous.scale).toBeCloseTo(0.7 / 360, 10);
-      expect(current.blur).toBeGreaterThan(previous.blur);
+      expect(current.scale).toBeGreaterThan(previous.scale);
+      expect(current.scale - previous.scale).toBeLessThan(0.006);
+      expect(current.blur).toBeGreaterThanOrEqual(previous.blur);
       expect(current.dissolve).toBeGreaterThanOrEqual(previous.dissolve);
-      if (current.age > 0.45) expect(current.opacity).toBeLessThan(previous.opacity);
+      if (current.age > 0.61) expect(current.opacity).toBeLessThan(previous.opacity);
     }
-    expect(cloudAt(source, 0.1).opacity).toBeLessThan(cloudAt(source, 0.42).opacity);
-    expect(cloudAt(source, 3).opacity).toBeLessThan(0.05);
-    const end = cloudAt(source, 6 - 1e-5);
-    expect(end.scale).toBeCloseTo(1.7, 5);
-    expect(end.blur).toBeCloseTo(0.13, 9);
+    expect(cloudAt(source, 0.1).opacity).toBeLessThan(cloudAt(source, 0.6).opacity);
+    expect(cloudAt(source, 3).opacity).toBeLessThan(0.09);
+    const end = cloudAt(source, FROZEN_CLOUD_LIFETIME - 1e-5);
+    expect(end.scale).toBeGreaterThan(2);
+    expect(end.scale).toBeLessThan(2.3);
+    expect(end.blur).toBeCloseTo(0.12, 9);
     expect(end.dissolve).toBeCloseTo(1, 9);
     expect(end.opacity).toBeLessThan(1e-10);
-    expect(cloudEventsAt(source, 7)).toEqual([]);
+    expect(cloudEventsAt(source, 1 + FROZEN_CLOUD_LIFETIME)).toEqual([]);
+  });
+
+  test("preserves a recognizable first second before eroding into an approaching cloud", () => {
+    const source = singleHit();
+    for (const age of [0, 0.25, 0.6, 1, 1.1]) {
+      expect(cloudAt(source, age).blur).toBeCloseTo(cloudAt(source, 0).blur, 12);
+      expect(cloudAt(source, age).dissolve).toBe(0);
+    }
+    expect(cloudAt(source, 1.6).dissolve).toBeGreaterThan(0);
+    expect(cloudAt(source, 1.6).blur).toBeGreaterThan(cloudAt(source, 1).blur);
+    // Constant motion toward the viewer expands more quickly in perspective
+    // as the object comes closer, while keeping its captured pose unchanged.
+    expect(cloudAt(source, 6).scale - cloudAt(source, 5).scale)
+      .toBeGreaterThan(cloudAt(source, 2).scale - cloudAt(source, 1).scale);
+  });
+
+  test("the shared capture plan reconstructs the same history for an independent renderer", () => {
+    const source = analysis((_time, index) => frame({ bass: index % 31 === 0 ? 0.08 : 0 }));
+    const plan = frozenCloudPlan(source);
+    const saved = structuredClone(plan);
+    for (const time of [0, 1.5, 4.6, 11, 7.5, 2.3]) {
+      const reconstructed = plan.map((event) => frozenCloudAt(event, time)).filter((event) => event !== undefined);
+      expect(reconstructed).toEqual(cloudEventsAt(source, time));
+    }
+    expect(plan).toEqual(saved);
+    const event = plan[0]!;
+    for (const time of [event.captureTime - 1e-8, event.captureTime + FROZEN_CLOUD_LIFETIME, NaN, Infinity]) {
+      expect(frozenCloudAt(event, time)).toBeUndefined();
+    }
   });
 
   test("uses identical frozen timestamps and envelopes for direct or reverse seeks", () => {
@@ -81,7 +116,7 @@ describe("frozen shape cloud events", () => {
     }
   });
 
-  test("keeps at most three live clouds with a 2.8 second gap and uncut tails", () => {
+  test("keeps at most three live clouds with a three second gap and uncut tails", () => {
     const source = analysis((_time, index) => frame({ bass: index % 2 === 1 ? 0.08 : 0 }), 60, 18);
     const captures = new Map<number, number>();
     for (let index = 0; index < 1440; index += 1) {
@@ -92,10 +127,11 @@ describe("frozen shape cloud events", () => {
     const times = [...captures.values()];
     expect(times.length).toBeGreaterThan(4);
     for (let index = 1; index < times.length; index += 1) {
-      expect(times[index]! - times[index - 1]!).toBeGreaterThanOrEqual(2.8 - 1e-9);
+      expect(times[index]! - times[index - 1]!).toBeGreaterThanOrEqual(3 - 1e-9);
     }
     for (const [id, captureTime] of captures) {
-      expect(cloudEventsAt(source, captureTime + 5.99).some((event) => event.id === id)).toBe(true);
+      expect(cloudEventsAt(source, captureTime + FROZEN_CLOUD_LIFETIME - 0.01).some((event) => event.id === id)).toBe(true);
+      expect(cloudEventsAt(source, captureTime + FROZEN_CLOUD_LIFETIME).some((event) => event.id === id)).toBe(false);
     }
   });
 
@@ -113,11 +149,14 @@ describe("frozen shape cloud events", () => {
   });
 
   test("captures an aligned bass onset at its timestamp with different analysis rates", () => {
+    const reference = cloudAt(singleHit(), 0.5);
     for (const fps of [24, 30, 60]) {
       const source = analysis((time) => frame({ bass: time >= 1 && time < 2 ? 0.08 : 0 }), fps);
       expect(cloudEventsAt(source, 1 - 1e-9)).toEqual([]);
       expect(cloudAt(source, 0.5).captureTime).toBe(1);
-      expect(cloudAt(source, 0.5).scale).toBeCloseTo(1 + 0.7 * 0.5 / 6, 10);
+      expect(cloudAt(source, 0.5).scale).toBe(reference.scale);
+      expect(cloudAt(source, 0.5).blur).toBe(reference.blur);
+      expect(cloudAt(source, 0.5).dissolve).toBe(reference.dissolve);
     }
   });
 });

@@ -1,6 +1,7 @@
 import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
 import { describe, expect, test } from "bun:test";
 import { FrozenCloudLayer } from "../src/render/frozen-cloud-layer.js";
+import { FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
 import { createSafeLayout } from "../src/render/layout.js";
 import { ANALYSIS_VERSION, type AudioAnalysis } from "../src/types.js";
 
@@ -83,13 +84,26 @@ describe("frozen cloud optical layer", () => {
     expect(refreshed).toEqual(fixture().render(reanalyzed, 1.8));
   });
 
+  test("evicts expired captures and reconstructs them only if a later seek needs them", () => {
+    const source = analysis();
+    const subject = fixture();
+    const first = subject.render(source, 1.6);
+    expect(subject.captureTimes).toEqual([1]);
+    subject.render(source, 8.6);
+    expect(subject.captureTimes).toEqual([1, 4, 7]);
+    subject.render(source, 8.8);
+    expect(subject.captureTimes).toEqual([1, 4, 7]);
+    expect(subject.render(source, 1.6)).toEqual(first);
+    expect(subject.captureTimes).toEqual([1, 4, 7, 1]);
+  });
+
   test("keeps white fog subtle and completely out of the title and artist band", () => {
     const source = analysis();
     for (const [width, height] of [[640, 360], [360, 640], [360, 360]] as const) {
       const subject = fixture(width, height);
       // Deliberately paint behind every text pixel to exercise the protection
       // mask independently of normal sculpture geometry and safe bounds.
-      const pixels = subject.render(source, 4.42, (context) => {
+      const pixels = subject.render(source, 7.6, (context) => {
         context.fillStyle = "white";
         context.fillRect(0, 0, width, height);
       });
@@ -98,7 +112,9 @@ describe("frozen cloud optical layer", () => {
       const full = alphaStats(pixels);
       expect(full.count).toBeGreaterThan(width * height * 0.2);
       expect(full.max).toBeGreaterThan(10);
-      expect(full.max).toBeLessThan(40);
+      // All three live ghosts together stay below one quarter opacity, even
+      // when every captured surface is opaque white rather than lit sculpture.
+      expect(full.max).toBeLessThan(64);
     }
   });
 
@@ -107,10 +123,10 @@ describe("frozen cloud optical layer", () => {
     // Keep a single hit, so subsequent captures cannot hide the last one's fade.
     for (let index = 61; index < source.frames.length; index += 1) source.frames[index]!.bass = 0;
     const subject = fixture();
-    const beginning = subject.render(source, 1.5);
-    const fog = subject.render(source, 4.5);
-    const end = subject.render(source, 6.99);
-    const gone = subject.render(source, 7);
+    const beginning = subject.render(source, 1.6);
+    const fog = subject.render(source, 6.5);
+    const end = subject.render(source, 1 + FROZEN_CLOUD_LIFETIME - 0.01);
+    const gone = subject.render(source, 1 + FROZEN_CLOUD_LIFETIME);
     expect(alphaStats(beginning).sum).toBeGreaterThan(1000);
     expect(alphaStats(fog).sum).toBeGreaterThan(0);
     expect(alphaStats(fog).sum).toBeLessThan(alphaStats(beginning).sum);

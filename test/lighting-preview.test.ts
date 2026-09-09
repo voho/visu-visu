@@ -3,12 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildLightingTimeline, createLightingPreviewHandler, LIGHTING_TIMELINE_STRIDE,
+  buildLightingTimeline, buildLightingGhostSchedule, createLightingPreviewHandler, LIGHTING_TIMELINE_STRIDE,
   parseByteRange, parseLightingPreviewArgs,
 } from "../src/preview/lighting-server.js";
 import { analyzeAudio } from "../src/audio/analyze.js";
 import { surfaceFeatureSamples, sampleSurfaceFeature } from "../src/render/surface-signal.js";
 import type { AnalysisFrame } from "../src/types.js";
+import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
 
 let directory: string;
 let audioPath: string;
@@ -87,6 +88,17 @@ describe("live lighting preview", () => {
     expect(timeline.slice(100, 132).some(value => value > 0)).toBe(true);
     expect(timeline[134]).toBeCloseTo(0.52, 6);
     expect(Math.hypot(timeline[132]!, timeline[133]!)).toBeCloseTo(1, 6);
+    const ghosts = buildLightingGhostSchedule(analysis);
+    expect(ghosts.lifetime).toBe(FROZEN_CLOUD_LIFETIME);
+    expect(ghosts.events).toEqual(frozenCloudPlan(analysis));
+    expect(ghosts.envelope[0]).toEqual({ scale: 1, opacity: 0, blur: 0.006, dissolve: 0 });
+    for (const age of [0.6, 1.5, 4, 7]) {
+      const expected = frozenCloudAt({ id: 0, captureTime: 0, strength: 1 }, age)!;
+      expect(ghosts.envelope[Math.round(age * ghosts.envelopeFps)]).toEqual({
+        scale: expected.scale, opacity: expected.opacity, blur: expected.blur, dissolve: expected.dissolve,
+      });
+    }
+    expect(ghosts.envelope.at(-1)!.opacity).toBeLessThan(1e-10);
     expect(timeline.length / 60).toBe(147);
     for (let layer = 0; layer < 6; layer += 1) {
       const energy = timeline[59 * LIGHTING_TIMELINE_STRIDE + 135 + layer * 2]!;

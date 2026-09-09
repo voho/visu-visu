@@ -1,4 +1,5 @@
 import { createSculpture } from '/lighting-mesh.js';
+import { createFrozenHistory } from '/lighting-ghosts.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -277,6 +278,34 @@ async function start() {
   play.disabled = false;
   status.textContent = 'Ready · WebGL';
   const values = new Float32Array(profile.stride);
+  const frozenValues = new Float32Array(profile.stride);
+  function sampleTimeline(time, output) {
+    const samplePosition = Math.max(0, Math.min(profile.frameCount - 1, time * profile.fps));
+    const frame = Math.floor(samplePosition), next = Math.min(frame + 1, profile.frameCount - 1);
+    const blend = samplePosition - frame;
+    for (let index = 0; index < profile.stride; index++) {
+      const value = timeline[frame * profile.stride + index];
+      output[index] = value + (timeline[next * profile.stride + index] - value) * blend;
+    }
+  }
+  function uploadSignals(signal) {
+    for (let band = 0; band < 32; band++) {
+      features[band] = Math.round(Math.max(0, Math.min(1, signal[36 + band])) * 255);
+      features[32 + band] = Math.round((Math.max(-1, Math.min(1, signal[68 + band])) * 0.5 + 0.5) * 255);
+      strip[band] = Math.round(Math.max(0, Math.min(1, signal[100 + band])) * 255);
+    }
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, featureTexture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 2, gl.LUMINANCE, gl.UNSIGNED_BYTE, features);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, stripTexture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, strip);
+  }
+  const history = createFrozenHistory(gl, profile.ghosts, (captureTime, width, height) => {
+    sampleTimeline(captureTime, frozenValues);
+    uploadSignals(frozenValues);
+    drawSculpture(frozenValues, width, height, 0);
+    return [0.5 + Math.sin(frozenValues[136] * 0.17) * frozenValues[135] * 0.005,
+      (width < height ? 0.59 : 0.635) + Math.cos(frozenValues[136] * 0.13) * frozenValues[135] * 0.005];
+  });
   const positions = new Float32Array(9);
   const colors = new Float32Array(9);
   const powers = new Float32Array(6);
@@ -287,7 +316,7 @@ async function start() {
   let lastSize = '';
   let fps = 0;
   // Exposes only diagnostic counters; source paths and audio data stay on the server.
-  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0 };
+  window.lightingPreview = { ready: true, renderedFrames: 0, fps: 0, time: 0, width: 0, height: 0, mode: 0, ghostPixelHash: id => history.pixelHash(id) };
   function draw(now) {
     const time = Math.max(0, Math.min(profile.duration, audio.currentTime || 0));
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -310,14 +339,14 @@ async function start() {
         gl.uniform2f(uniform('uResolution'), width, height);
         lastSize = size;
       }
-      const samplePosition = Math.min(profile.frameCount - 1, time * profile.fps);
-      const frame = Math.floor(samplePosition);
-      const next = Math.min(frame + 1, profile.frameCount - 1);
-      const blend = samplePosition - frame;
-      for (let i = 0; i < profile.stride; i++) {
-        const left = timeline[frame * profile.stride + i];
-        values[i] = left + (timeline[next * profile.stride + i] - left) * blend;
-      }
+      sampleTimeline(time, values);
+      history.update(time, width, height, mode === 0);
+      // Capturing history temporarily uploads old FFT/material light data.
+      // Restore the live textures and drawing state before painting this frame.
+      uploadSignals(values);
+      gl.useProgram(program); gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
+      gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+      gl.viewport(0, 0, width, height); gl.uniform2f(uniform('uResolution'), width, height);
       for (let i = 0; i < 3; i++) {
         const offset = 12 + i * 8;
         for (let axis = 0; axis < 3; axis++) {
@@ -327,17 +356,6 @@ async function start() {
         powers[i * 2] = values[offset + 6];
         powers[i * 2 + 1] = values[offset + 7];
       }
-      for (let band = 0; band < 32; band++) {
-        features[band] = Math.round(Math.max(0, Math.min(1, values[36 + band])) * 255);
-        features[32 + band] = Math.round((Math.max(-1, Math.min(1, values[68 + band])) * 0.5 + 0.5) * 255);
-      }
-      gl.activeTexture(gl.TEXTURE4);
-      gl.bindTexture(gl.TEXTURE_2D, featureTexture);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 2, gl.LUMINANCE, gl.UNSIGNED_BYTE, features);
-      for (let band = 0; band < 32; band++) strip[band] = Math.round(Math.max(0, Math.min(1, values[100 + band])) * 255);
-      gl.activeTexture(gl.TEXTURE5);
-      gl.bindTexture(gl.TEXTURE_2D, stripTexture);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, strip);
       gl.uniform1f(uniform('uTime'), values[0]);
       gl.uniform4f(uniform('uMotion'), values[2], values[5], values[4], values[7]);
       gl.uniform4fv(uniform('uDynamics[0]'), values.subarray(135, 147));
@@ -348,6 +366,7 @@ async function start() {
       gl.uniform2fv(uniform('uLightPower[0]'), powers);
       gl.uniform1f(uniform('uView'), mode);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (mode === 0) history.draw(time, width, height);
       drawSculpture(values, width, height, mode);
       frames++;
       window.lightingPreview.renderedFrames++;
@@ -362,7 +381,7 @@ async function start() {
     }
     seek.value = String(time);
     document.querySelector('#elapsed').textContent = clock(time);
-    Object.assign(window.lightingPreview, { fps, time, width, height, mode });
+    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time) });
     if (!gl.isContextLost()) requestAnimationFrame(draw);
   }
   play.addEventListener('click', async () => {
