@@ -1856,6 +1856,11 @@ export class VisualizerRenderer {
       ),
     );
     context.fillStyle = titleGradient;
+    if (this.artwork?.thumbnail) {
+      this.drawCoverCredits(this.artwork.thumbnail, title, artist, baseTitleSize, safeY + rise);
+      context.restore();
+      return;
+    }
     const titleSize = this.drawFittedText(
       context,
       title,
@@ -1882,6 +1887,101 @@ export class VisualizerRenderer {
       );
     }
     context.restore();
+  }
+
+  private drawCoverCredits(
+    thumbnail: Canvas,
+    title: string,
+    artist: string,
+    baseSize: number,
+    top: number,
+  ): void {
+    const context = this.context;
+    const smallSide = Math.min(this.width, this.height);
+    let coverSize = Math.min(smallSide * 0.13, (this.layout.graphTop - this.layout.titleY) * 0.94);
+    const gap = smallSide * 0.023;
+    let available = this.layout.textWidth * 0.92 - coverSize - gap;
+    context.textAlign = "left";
+    context.textBaseline = "alphabetic";
+
+    const measure = (text: string, weight: string, size: number, spacing: number) => {
+      context.font = `${weight} ${size}px sans-serif`;
+      context.letterSpacing = `${spacing}px`;
+      let metrics = context.measureText(text);
+      const scale = Math.min(1, available / Math.max(1, metrics.width));
+      size *= scale;
+      spacing *= scale;
+      const font = `${weight} ${size}px sans-serif`;
+      const letterSpacing = `${spacing}px`;
+      context.font = font;
+      context.letterSpacing = letterSpacing;
+      metrics = context.measureText(text);
+      return {
+        text, font, letterSpacing, size,
+        width: Math.max(0, metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight),
+        height: text ? metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent : 0,
+        left: metrics.actualBoundingBoxLeft,
+        ascent: metrics.actualBoundingBoxAscent,
+      };
+    };
+    const measureLines = () => {
+      const titleLine = measure(title, "600", baseSize, baseSize * 0.015);
+      const artistSize = title ? Math.min(baseSize * 0.62, titleLine.size * 0.72) : baseSize * 0.62;
+      const artistLine = measure(artist, "500", artistSize, artistSize * 0.025 / 0.62);
+      const lineGap = title && artist ? titleLine.size * 0.18 : 0;
+      return { titleLine, artistLine, lineGap, textHeight: titleLine.height + lineGap + artistLine.height };
+    };
+    // The cover spans both visible text lines with a little breathing room.
+    // Refit once after reserving its height so wide labels still stay safe.
+    coverSize = Math.max(coverSize, measureLines().textHeight * 1.06);
+    available = Math.max(1, this.layout.textWidth * 0.92 - coverSize - gap);
+    const { titleLine, artistLine, lineGap, textHeight } = measureLines();
+    const groupHeight = Math.max(coverSize, textHeight);
+    const textWidth = Math.max(titleLine.width, artistLine.width);
+    const left = this.layout.textCenterX - (coverSize + gap + textWidth) / 2;
+    const coverTop = top + (groupHeight - coverSize) / 2;
+    const textTop = top + (groupHeight - textHeight) / 2;
+    const textLeft = left + coverSize + gap;
+    const radius = coverSize * 0.14;
+    // Tall accents and the entrance rise must fit too. Scale the complete
+    // group so its center and the cover/text proportions stay intact.
+    const fit = Math.min(1, Math.max(1, this.layout.graphTop - top - smallSide * 0.002) / groupHeight);
+    context.translate(this.layout.textCenterX, top);
+    context.scale(fit, fit);
+    context.translate(-this.layout.textCenterX, -top);
+
+    context.save();
+    context.shadowColor = "rgba(0,0,0,0.82)";
+    const finalCoverTop = top + (coverTop - top) * fit;
+    const shadowRoom = Math.max(0, Math.min(
+      finalCoverTop - this.layout.top,
+      this.layout.graphTop - finalCoverTop - coverSize * fit,
+    ));
+    context.shadowBlur = Math.min(smallSide * 0.011 * fit, shadowRoom * 0.7);
+    context.shadowOffsetY = Math.min(smallSide * 0.003 * fit, shadowRoom * 0.2);
+    context.beginPath();
+    context.roundRect(left, coverTop, coverSize, coverSize, radius);
+    context.fillStyle = "rgba(0,0,0,0.9)";
+    context.fill();
+    context.shadowBlur = 0;
+    context.shadowOffsetY = 0;
+    context.clip();
+    context.drawImage(thumbnail, left, coverTop, coverSize, coverSize);
+    context.strokeStyle = this.color(this.palettePhase, 12, 96, 0.16);
+    context.lineWidth = smallSide / 1080;
+    context.stroke();
+    context.restore();
+
+    const drawLine = (line: typeof titleLine, y: number) => {
+      if (!line.text) return;
+      context.font = line.font;
+      context.letterSpacing = line.letterSpacing;
+      context.fillText(line.text, textLeft + line.left, y + line.ascent);
+    };
+    drawLine(titleLine, textTop);
+    context.shadowBlur = Math.min(4, this.width * 0.0022);
+    context.fillStyle = this.color(this.palettePhase + 72, 16, 96, 0.96);
+    drawLine(artistLine, textTop + titleLine.height + lineGap);
   }
 
   private drawFittedText(

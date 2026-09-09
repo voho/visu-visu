@@ -315,10 +315,47 @@ async function start() {
   gl.uniform1f(uniform('uHasArtwork'), profile.hasArtwork ? 1 : 0);
   gl.uniform1f(uniform('uImpactLimit'), profile.lowFlash ? 0.4 : 1);
   gl.uniform1f(uniform('uArtworkAspect'), artworkAspect);
-  document.title = `${profile.title} · Live resonance`;
-  document.querySelector('#title').textContent = profile.title;
-  document.querySelector('#artist').textContent = profile.artist;
-  document.querySelector('#artist').hidden = !profile.artist;
+  const titleText=typeof profile.title==='string'?profile.title.trim():'';
+  const artistText=typeof profile.artist==='string'?profile.artist.trim():'';
+  document.title = `${titleText||artistText||'Visu Visu'} · Live resonance`;
+  const credits=document.querySelector('#credits'),thumbnail=document.querySelector('#credit-cover');
+  document.querySelector('#title').textContent=titleText;
+  document.querySelector('#title').hidden=!titleText;
+  document.querySelector('#artist').textContent=artistText;
+  document.querySelector('#artist').hidden=!artistText;
+  credits.dataset.creditCount=String(Number(Boolean(titleText))+Number(Boolean(artistText)));
+  credits.dataset.hasTitle=String(Boolean(titleText));
+  if(profile.hasArtwork&&(titleText||artistText)) {
+    thumbnail.src='/artwork';
+    try {await thumbnail.decode();thumbnail.hidden=false;credits.classList.add('has-cover');}
+    catch {thumbnail.removeAttribute('src');}
+  }
+  credits.hidden=!titleText&&!artistText;
+  const creditCopy=credits.querySelector('.credit-copy');
+  function fitCreditGroup() {
+    creditCopy.style.width='';
+    credits.style.removeProperty('--measured-cover-size');
+    if(!credits.classList.contains('has-cover')||credits.hidden)return;
+    // Balanced wrapped lines have a wider CSS box than their visible text. Fit
+    // that box before centering the complete lockup, then span its full height.
+    for(let pass=0;pass<3;pass++) {
+      let lineWidth=0;
+      for(const element of creditCopy.children) {
+        if(element.hidden)continue;
+        const range=document.createRange();
+        range.selectNodeContents(element);
+        for(const line of range.getClientRects())lineWidth=Math.max(lineWidth,line.width);
+      }
+      if(lineWidth>0)creditCopy.style.width=`${Math.ceil(lineWidth)+1}px`;
+      credits.style.setProperty('--measured-cover-size',`${Math.ceil(creditCopy.getBoundingClientRect().height)}px`);
+    }
+  }
+  fitCreditGroup();
+  let creditResizeFrame=0;
+  window.addEventListener('resize',()=>{
+    cancelAnimationFrame(creditResizeFrame);
+    creditResizeFrame=requestAnimationFrame(fitCreditGroup);
+  });
   document.querySelector('#duration').textContent = clock(profile.duration);
   seek.max = String(profile.duration);
   seek.disabled = false;

@@ -16,6 +16,8 @@ const artworkWarps = new WeakMap<Canvas, ArtworkWarp>();
 export interface PreparedArtwork {
   /** Low-resolution, softened and masked texture; no per-frame image decoding. */
   canvas: Canvas;
+  /** Sharp, ungraded square cover for the track-credit lockup. */
+  thumbnail?: Canvas;
   /** Target render dimensions (the texture itself is deliberately smaller). */
   width: number;
   height: number;
@@ -96,6 +98,14 @@ export async function prepareArtwork(
   paletteContext.drawImage(source, 0, 0, paletteCanvas.width, paletteCanvas.height);
   const palettePixels = paletteContext.getImageData(0, 0, paletteCanvas.width, paletteCanvas.height).data;
   const palette = extractPalette(palettePixels);
+  // Credits show a recognizable miniature of the source, independently of the
+  // softened, darkened background and the object's lighting/normal maps.
+  const thumbnail = createCanvas(256, 256);
+  const sourceSide = Math.min(source.width, source.height);
+  thumbnail.getContext("2d").drawImage(
+    source, (source.width - sourceSide) / 2, (source.height - sourceSide) / 2,
+    sourceSide, sourceSide, 0, 0, thumbnail.width, thumbnail.height,
+  );
   // The object receives the complete image before background contrast changes,
   // aspect cropping, vignette or credit/hero masks. Tiny dimensions are expanded
   // only to satisfy finite-difference normal sampling.
@@ -177,7 +187,7 @@ export async function prepareArtwork(
     material.albedo[index] = protectedPixels[index]!;
   }
   artworkWarps.set(canvas, new ArtworkWarp(canvas));
-  return { canvas, width, height, ...colors, material, objectMaterial };
+  return { canvas, thumbnail, width, height, ...colors, material, objectMaterial };
 }
 
 /** Slow breathing plus a 1.2% bass impulse zoom; opacity never follows a beat. */

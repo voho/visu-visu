@@ -8,16 +8,24 @@
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #080808; color: var(--credit-title, #f5f5f5); }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body { margin: 0; min-height: 100svh; overflow: hidden; }
     #scene { position: fixed; inset: 0; width: 100%; height: 100%; }
     .topbar { position: fixed; z-index: 1; top: max(24px, env(safe-area-inset-top)); left: 32px; right: 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .brand { font-size: 11px; font-weight: 700; letter-spacing: .22em; }
     .mode { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #bdbdbd; }
     select { appearance: auto; border: 1px solid #ffffff20; border-radius: 7px; color: #eeeeee; background: #171717dd; padding: 9px 10px; font: inherit; cursor: pointer; }
-    .credits { position: fixed; left: 6%; right: 6%; top: 68%; text-align: center; text-shadow: 0 2px 16px #030303, 0 1px 4px #000; pointer-events: none; }
+    .credits { --title-size: clamp(28px, 4.3vw, 64px); --artist-size: clamp(21px, 2.25vw, 34px); --cover-size: clamp(82px, 9.12vw, 144px); position: fixed; left: 6%; right: 6%; top: 68%; text-align: center; text-shadow: 0 2px 16px #030303, 0 1px 4px #000; pointer-events: none; }
     .eyebrow { color: var(--credit-accent, #c0c0c0); text-transform: uppercase; font-size: 10px; letter-spacing: .27em; margin-bottom: 12px; }
-    h1 { margin: 0; font-size: clamp(28px, 4.3vw, 64px); line-height: 1.13; font-weight: 650; letter-spacing: -.035em; text-wrap: balance; }
-    .artist { font-size: clamp(21px, 2.25vw, 34px); font-weight: 500; letter-spacing: .02em; margin: 13px 0 0; color: var(--credit-artist, #dddddd); }
+    .credit-lockup { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; gap: clamp(12px, 1.7vw, 26px); vertical-align: top; }
+    .credit-copy { min-width: 0; }
+    .has-cover .credit-copy { text-align: left; }
+    .credit-cover { display: block; flex: 0 0 auto; width: max(var(--cover-size), var(--measured-cover-size, 0px)); height: max(var(--cover-size), var(--measured-cover-size, 0px)); object-fit: cover; border-radius: 14%; box-shadow: 0 3px 18px #000a, 0 1px 5px #000c, 0 0 0 1px #ffffff10; }
+    h1 { margin: 0; font-size: var(--title-size); line-height: 1.13; font-weight: 650; letter-spacing: -.035em; text-wrap: balance; overflow-wrap: anywhere; }
+    .artist { font-size: var(--artist-size); line-height: 1.2; font-weight: 500; letter-spacing: .02em; margin: 13px 0 0; color: var(--credit-artist, #dddddd); overflow-wrap: anywhere; }
+    .credits[data-credit-count="1"] { --cover-size: calc(var(--title-size) * 1.62); }
+    .credits[data-has-title="false"] { --cover-size: calc(var(--artist-size) * 1.62); }
+    .credits[data-has-title="false"] .artist { margin-top: 0; }
     .player { position: fixed; left: max(24px, calc((100vw - 950px) / 2)); right: max(24px, calc((100vw - 950px) / 2)); bottom: max(28px, env(safe-area-inset-bottom)); padding: 16px 22px; border: 1px solid #ffffff16; border-radius: 18px; background: #0c0c0cc9; backdrop-filter: blur(20px); display: flex; align-items: center; gap: 20px; }
     #play { display: grid; place-items: center; background: #dddddd; color: #141414; border: 0; border-radius: 50%; width: 43px; height: 43px; flex-shrink: 0; cursor: pointer; font-size: 16px; }
     #play:focus-visible, select:focus-visible, #seek:focus-visible { outline: 2px solid #dddddd; outline-offset: 4px; }
@@ -28,15 +36,16 @@
     #seek::-moz-range-thumb { width: 10px; height: 10px; border: 0; border-radius: 50%; background: var(--credit-accent, #dddddd); }
     #status { color: #b6b6b6; font-size: 11px; white-space: nowrap; }
     #error { position: fixed; z-index: 4; top: 20%; left: 10%; right: 10%; text-align: center; padding: 24px; border: 1px solid #777777; border-radius: 12px; background: #202020ee; }
-    @media (max-width: 620px) { .topbar { left: 20px; right: 20px; top: 22px; } .mode-label, #status { display: none; } .player { left: 16px; right: 16px; padding: 13px 15px; gap: 15px; bottom: max(20px, env(safe-area-inset-bottom)); } .credits { top: 66%; left: 7%; right: 7%; } .eyebrow { font-size: 9px; margin-bottom: 13px; } h1 { font-size: clamp(27px, 7.9vw, 44px); } .artist { margin-top: 12px; } }
-    @media (max-height: 600px) and (min-width: 621px) { .credits { top: 62%; } .eyebrow { display: none; } h1 { font-size: 32px; } .artist { font-size: 22px; margin-top: 6px; } .player { bottom: 14px; padding: 9px 18px; } }
+    @media (max-width: 620px) { .topbar { left: 20px; right: 20px; top: 22px; } .mode-label, #status { display: none; } .player { left: 16px; right: 16px; padding: 13px 15px; gap: 15px; bottom: max(20px, env(safe-area-inset-bottom)); } .credits { --title-size: clamp(27px, 7.9vw, 44px); top: 66%; left: 7%; right: 7%; } .credits.has-cover { --title-size: clamp(25px, 7vw, 36px); --cover-size: clamp(82px, 26.4vw, 108px); } .eyebrow { font-size: 9px; margin-bottom: 13px; } .artist { margin-top: 8px; } .credits.has-cover[data-credit-count="1"] { --cover-size: calc(var(--title-size) * 1.62); } .credits.has-cover[data-has-title="false"] { --cover-size: calc(var(--artist-size) * 1.62); } }
+    @media (max-width: 620px) and (max-height: 700px) { .credits { top: 62%; } .eyebrow { margin-bottom: 9px; } }
+    @media (max-height: 600px) and (min-width: 621px) { .credits { --title-size: 28px; --artist-size: 20px; --cover-size: 70px; top: 61%; } .eyebrow { display: none; } .artist { margin-top: 5px; } .player { bottom: 10px; padding: 9px 18px; } }
   </style>
   <script type="module" src="/lighting.js"></script>
 </head>
 <body>
   <canvas id="scene" aria-label="Flowing audio-reactive sculpture with textured folds, luminous filaments, and moving colored lights"></canvas>
   <header class="topbar"><span class="brand">VISU VISU</span><label class="mode"><span class="mode-label">LIVE RESONANCE</span><select id="view" aria-label="Material view"><option value="0">Illuminated</option><option value="1">Texture</option><option value="2">Normal map</option><option value="3">Roughness</option></select></label></header>
-  <main class="credits"><div class="eyebrow">Live resonance preview</div><h1 id="title">Preparing the lights</h1><p class="artist" id="artist"></p></main>
+  <main class="credits" id="credits"><div class="eyebrow">Live resonance preview</div><div class="credit-lockup" id="credit-lockup"><img class="credit-cover" id="credit-cover" alt="" hidden><div class="credit-copy"><h1 id="title">Preparing the lights</h1><p class="artist" id="artist"></p></div></div></main>
   <div class="player"><button type="button" id="play" aria-label="Play" disabled>▶</button><div class="transport"><input id="seek" type="range" min="0" max="1" value="0" step="0.001" aria-label="Song position" disabled><div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div></div><span id="status" role="status">Loading material</span></div>
   <p id="error" role="alert" hidden></p><audio id="audio" preload="auto" src="/audio"></audio>
 </body>

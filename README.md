@@ -18,7 +18,7 @@ Soft rotating wisps, a contact shadow, local diffraction flares and expanding ba
 
 The deterministic conductor compares each section with the track's own energy range, then hands the scene between ambient, build, peak and release modes. Quiet passages leave space around the sculpture; builds add depth and camera motion; peaks increase deformation and light; releases soften the scene. Every layer is derived from absolute time, cached analysis and seeded plans, so the result remains reproducible. Large, high-contrast title and artist typography uses restrained letter spacing and aspect-aware safe zones for TikTok, Instagram, YouTube and Vimeo players.
 
-Title and artist are centered horizontally in the full frame, with their own symmetric text bounds. The sculpture uses a separate safe composition: landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
+With a cover image, a rounded thumbnail spans both credit lines beside the left-aligned title and artist. The image and two-line text block are vertically centered together, and the complete group is centered horizontally in the video. Without a cover, both text lines remain centered. The sculpture uses a separate safe composition: landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
 
 Every MP4 contains the song as stereo AAC-LC at 48 kHz with a 384 kbps target bitrate.
 
@@ -103,7 +103,7 @@ bun run render -- ./song.wav --image ./cover.png --lighting 0.8
 bun run clip -- ./song.wav --artist "Artist Name" --lighting 0.45
 ```
 
-`--lighting 0` disables this material lighting. The three point lights and reflected spectrum follow absolute musical time and frequency envelopes, so direct seeks recreate the same light positions and highlights. Low-flash mode reduces fast light accents while retaining their motion. Large, centered title and artist text is drawn after lighting and remains unaffected by it.
+`--lighting 0` disables this material lighting. The three point lights and reflected spectrum follow absolute musical time and frequency envelopes, so direct seeks recreate the same light positions and highlights. Low-flash mode reduces fast light accents while retaining their motion. The centered credit group is drawn after lighting; its large title and artist text remains unaffected by surface effects.
 
 Regenerate all maps deterministically from the committed source:
 
@@ -156,7 +156,7 @@ The separate `clip` command selects a highlight and creates a portrait **1080×1
 bun run clip -- ./song.mp3 --title "Night Signal" --artist "Artist Name"
 ```
 
-By default it looks for a strong, sustained bass-heavy drop, starts about **five seconds before it**, and renders **up to 30 seconds**. The entrance fades in over 0.35 seconds; picture and audio fade out together over the final three seconds. Short artist names remain about 20 px high in a 360-pixel-wide portrait preview. Both credit lines are centered in the full frame, above the visualization.
+By default it looks for a strong, sustained bass-heavy drop, starts about **five seconds before it**, and renders **up to 30 seconds**. The entrance fades in over 0.35 seconds; picture and audio fade out together over the final three seconds. Responsive title and artist sizing fits the available width while keeping the artist line readable beneath the title. The credits sit above the visualization: a supplied cover and left-aligned text form one centered group, or the text alone is centered when no image is supplied.
 
 A loud isolated hit does not count as a drop: selection combines the immediate energy jump, contrast with the preceding section, and sustained energy after the hit. If no distinct drop is found, the command chooses the strongest sustained-energy window instead. This is an audio-feature heuristic; use `--dry-run` to inspect its choice or `--drop` for a known musical timestamp:
 
@@ -194,7 +194,7 @@ The analysis contains time-indexed RMS, peak, a log-frequency spectrum, bass/mid
 
 Cached analysis is bound to the exact source file as well as its decoded PCM. The current analysis version remains **2**; regenerate older versions with `bun run analyze`. A cache must also match the output frame rate, so regenerate a 24 or 30 fps cache for a 60 fps render. The renderer rejects a cache paired with another audio file, malformed feature values, unsupported versions, or inconsistent frame counts. JSON caches are capped at 128 MiB; longer-form sets should currently be analyzed as part of the render instead of saved.
 
-With the same decoded audio, input image bytes (if supplied), bundled material source, settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **18**; analysis remains at version **2**. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
+With the same decoded audio, input image bytes (if supplied), bundled material source, settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **19**; analysis remains at version **2**. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
 
 ## Project configuration
 
@@ -274,7 +274,7 @@ Nebula, bokeh, stardust and glints fill the frame. Processed artwork, a softly l
 | Square | `x 8–92%` | `x 8–80%`, `y 30–60%` |
 | Portrait | `x 12–88%` | `x 12–76%`, `y 30–60%` |
 
-Both credit lines share the exact horizontal midpoint of the video. Vertical and square graph bounds reserve extra room for captions, progress controls, and right-side reaction/action buttons. Long title and artist strings are measured, scaled to their symmetric safe width, and clipped to the upper text region as a final guard.
+The complete cover-and-text credit group shares the horizontal midpoint of the video. The rounded cover sits to the left of the vertically centered, left-aligned text block; without artwork, both credit lines share the video midpoint. Vertical and square graph bounds reserve extra room for captions, progress controls, and right-side reaction/action buttons. Long title and artist strings are measured and scaled to the available space within the symmetric safe width, then clipped to the upper credit region as a final guard.
 
 Useful platform renders:
 
@@ -322,7 +322,7 @@ bun run test:e2e:clip
 bun run test:e2e
 ```
 
-The automated clip E2E generates a longer audio fixture with a known drop and passes a busy cover image through the public `clip --image` CLI. It checks a 30-second portrait MP4, the drop five seconds into the excerpt, all 1,800 frames at 60 fps, H.264/AAC encoding, matching audio/video duration, song and artist metadata, and decoded picture/audio fades. Both credit lines must remain visible and horizontally centered in a decoded 360-pixel-wide portrait preview with the artwork present. Output uses the default 1080×1920 delivery size with a quarter-scale internal render to limit test time. This verifies full-length clip selection and export; `bun run test:clip` is the shorter, six-second real-audio smoke render for visual inspection. Both require FFmpeg and FFprobe on `PATH`. Bare `bun test` discovers both suites, including the longer E2E.
+The automated clip E2E generates a longer audio fixture with a known drop and passes a busy cover image through the public `clip --image` CLI. It checks a 30-second portrait MP4, the drop five seconds into the excerpt, all 1,800 frames at 60 fps, H.264/AAC encoding, matching audio/video duration, song and artist metadata, and decoded picture/audio fades. Both credit lines must remain visible beside the cover in a decoded 360-pixel-wide portrait preview. The test distinguishes the colorful thumbnail from text ink, checks the combined group is centered, and measures fades on the artist text independently. Output uses the default 1080×1920 delivery size with a quarter-scale internal render to limit test time. This verifies full-length clip selection and export; `bun run test:clip` is the shorter, six-second real-audio smoke render for visual inspection. Both require FFmpeg and FFprobe on `PATH`. Bare `bun test` discovers both suites, including the longer E2E.
 
 For a manual output check:
 

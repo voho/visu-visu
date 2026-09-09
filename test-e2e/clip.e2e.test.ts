@@ -73,7 +73,7 @@ interface TextRegion {
   bottom: number;
 }
 
-function textInk(frame: Buffer, region: TextRegion): { pixels: number[]; height: number; width: number; centerX: number } {
+function textInk(frame: Buffer, region: TextRegion): { pixels: number[]; height: number; width: number; left: number; right: number; top: number; bottom: number; centerX: number; centerY: number } {
   const pixels: number[] = [];
   const rows: number[] = [];
   let left = smallWidth;
@@ -92,7 +92,43 @@ function textInk(frame: Buffer, region: TextRegion): { pixels: number[]; height:
     // Ignore isolated stars when measuring the height of the letter forms.
     if (rowPixels >= 5) rows.push(y);
   }
-  return { pixels, height: rows.length ? rows.at(-1)! - rows[0]! + 1 : 0, width: right - left + 1, centerX: (left + right) / 2 };
+  const top = rows[0] ?? region.top;
+  const bottom = rows.at(-1) ?? top;
+  return { pixels, height: rows.length ? bottom - top + 1 : 0, width: right - left + 1,
+    left, right, top, bottom, centerX: (left + right) / 2, centerY: (top + bottom) / 2 };
+}
+
+function coverInk(frame: Buffer, region: TextRegion): { pixels: number; left: number; right: number; top: number; bottom: number } {
+  let pixels = 0;
+  let left = region.right, right = region.left, top = region.bottom, bottom = region.top;
+  for (let y = region.top; y < region.bottom; y++) for (let x = region.left; x < region.right; x++) {
+    const index = (y * smallWidth + x) * 3;
+    const r = frame[index]!, g = frame[index + 1]!, b = frame[index + 2]!;
+    // The fixture's orange checks distinguish the bright thumbnail from white
+    // credit ink. The subdued background remains below this color threshold.
+    if (r > 160 && r > g * 1.35 && b < 180) {
+      pixels++;
+      left = Math.min(left, x); right = Math.max(right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
+    }
+  }
+  return { pixels, left, right, top, bottom };
+}
+
+function textBands(frame: Buffer, region: TextRegion): TextRegion[] {
+  const bands: TextRegion[] = [];
+  for (let y = region.top; y < region.bottom; y++) {
+    let ink = 0;
+    for (let x = region.left; x < region.right; x++) {
+      const index = (y * smallWidth + x) * 3;
+      ink += Number(Math.min(frame[index]!, frame[index + 1]!, frame[index + 2]!) > 170);
+    }
+    if (ink < 5) continue;
+    const previous = bands.at(-1);
+    if (previous && y - previous.bottom <= 2) previous.bottom = y + 1;
+    else bands.push({ ...region, top: y, bottom: y + 1 });
+  }
+  return bands;
 }
 
 function inkBrightness(frame: Buffer, pixels: number[]): number {
@@ -188,8 +224,16 @@ describe("portrait clip end to end", () => {
     const frameBytes = smallWidth * smallHeight * 3;
     expect(frames.length).toBe(indices.length * frameBytes);
     const frameAt = (position: number): Buffer => frames.subarray(position * frameBytes, (position + 1) * frameBytes);
-    const title = textInk(frameAt(3), { left: 43, right: 317, top: 110, bottom: 146 });
-    const artist = textInk(frameAt(3), { left: 43, right: 317, top: 147, bottom: 181 });
+    const creditRegion = { left: 43, right: 317, top: 108, bottom: 182 };
+    const thumbnail = coverInk(frameAt(3), creditRegion);
+    expect(thumbnail.pixels).toBeGreaterThan(180);
+    expect(thumbnail.right - thumbnail.left + 1).toBeGreaterThan(32);
+    expect(thumbnail.bottom - thumbnail.top + 1).toBeGreaterThan(32);
+    // Exclude every checkerboard pixel before measuring the two text lines.
+    const bands = textBands(frameAt(3), { ...creditRegion, left: thumbnail.right + 4 });
+    expect(bands).toHaveLength(2);
+    const title = textInk(frameAt(3), bands[0]!);
+    const artist = textInk(frameAt(3), bands[1]!);
     // Check rendered ink, not just metadata: both credits must be visible and
     // large enough at phone-preview size. No golden image or fixed font face.
     expect(title.pixels.length).toBeGreaterThan(250);
@@ -198,8 +242,14 @@ describe("portrait clip end to end", () => {
     expect(artist.pixels.length).toBeGreaterThan(150);
     expect(artist.height).toBeGreaterThanOrEqual(12);
     expect(artist.width).toBeGreaterThan(70);
-    expect(Math.abs(title.centerX - smallWidth / 2)).toBeLessThan(3);
-    expect(Math.abs(artist.centerX - smallWidth / 2)).toBeLessThan(3);
+    expect(Math.abs(title.left - artist.left)).toBeLessThan(3);
+    expect(Math.min(title.left, artist.left) - thumbnail.right).toBeGreaterThan(4);
+    const groupRight = Math.max(title.right, artist.right);
+    expect(Math.abs((thumbnail.left + groupRight) / 2 - smallWidth / 2)).toBeLessThan(3);
+    const textCenterY = (title.top + artist.bottom) / 2;
+    const coverCenterY = (thumbnail.top + thumbnail.bottom) / 2;
+    expect(Math.abs(textCenterY - coverCenterY)).toBeLessThan(3);
+    expect(thumbnail.bottom - thumbnail.top + 1).toBeGreaterThanOrEqual(artist.bottom - title.top + 1 - 2);
     const fullLight = inkBrightness(frameAt(3), artist.pixels);
     const tail = rms(samples, 26, 26.1);
     for (const [position, time, expectedGain, referenceAudio] of [
