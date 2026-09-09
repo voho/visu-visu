@@ -1,6 +1,7 @@
 // The live sculpture follows the same toroidal flow, morph clocks, and bass-first
 // geometry as render/resonance.ts. The GPU shades its translucent material skin
 // and the original-style luminous filaments as one coherent object.
+import { previewCamera } from '/lighting-camera.js';
 export function createSculpture(gl, hasArtwork = false) {
   const vertexFeatures = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) > 0;
   const vertex = `
@@ -10,6 +11,7 @@ uniform vec2 uResolution;
 uniform vec4 uMotion;
 uniform vec4 uClock;
 uniform vec4 uDynamics[3];
+uniform vec4 uCamera;
 uniform sampler2D uFeatures;
 varying vec3 vPosition;
 varying vec3 vNormal;
@@ -74,16 +76,16 @@ void main() {
   vUv=aParameter;
   vEnergy=feature(0.5-cos(aParameter.x*TAU+uClock.x*0.1)*0.5).x;
   float aspect=uResolution.x/uResolution.y;
-  float zoom=1.0+uDynamics[1].x*0.021+uDynamics[2].z*0.009;
-  float size=min(uResolution.x,uResolution.y)*(aspect<1.0?0.432:0.338)*zoom;
+  float size=min(uResolution.x,uResolution.y)*(aspect<1.0?0.432:0.338)*uCamera.w;
   float perspective=3.8/(3.8-p.z);
-  vec2 cameraDrift=vec2(sin(uDynamics[0].y*0.17),cos(uDynamics[0].y*0.13))*uDynamics[0].x*0.005;
-  vec2 pixel=uResolution*(vec2(0.5,aspect<1.0?0.59:0.635)+cameraDrift)+p.xy*size*perspective;
+  vec2 projected=mat2(cos(uCamera.z),sin(uCamera.z),-sin(uCamera.z),cos(uCamera.z))*p.xy;
+  vec2 pixel=uResolution*uCamera.xy+projected*size*perspective;
   gl_Position=vec4(pixel/uResolution*2.0-1.0,-p.z*0.35,1.0);
 }
 `;
   const fragment = `
 precision highp float;
+uniform vec2 uResolution;
 uniform vec3 uLightPosition[3];
 uniform vec3 uLightColor[3];
 uniform vec2 uLightPower[3];
@@ -206,13 +208,13 @@ void main() {
  if(uPass<0.5) {
   float facing=abs(dot(normal,normalize(vec3(0.0,0.0,3.4)-vPosition)));
   float alpha=((uHasArtwork>0.5?0.44:0.20)+pow(1.0-facing,2.0)*0.19)*(0.7+vEnergy*0.3)*coverage;
-  gl_FragColor=vec4(color*0.8,alpha);
+  gl_FragColor=vec4(color*0.8,alpha*smoothstep(0.312,0.358,gl_FragCoord.y/uResolution.y));
  } else {
   float tracer=pow(max(0.0,sin(vUv.x*TAU*2.0-uDynamics[2].y*1.35+vUv.y*TAU)),28.0);
   vec3 tint=mix(uLightColor[0],uLightColor[1],0.5+sin(vUv.y*TAU+uClock.x*0.15)*0.5);
   float light=0.32+vEnergy*0.24+tracer*(0.25+uMotion.z*0.55);
   color=mix(color,tint,0.64)*light;
-  gl_FragColor=vec4(color,0.50*coverage);
+  gl_FragColor=vec4(color,0.50*coverage*smoothstep(0.312,0.358,gl_FragCoord.y/uResolution.y));
  }
 }
 `;
@@ -251,8 +253,10 @@ void main() {
   return (values,width,height,mode)=>{
     gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,parameterBuffer);gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,2,gl.FLOAT,false,0,0);
     gl.uniform2f(uniform('uResolution'),width,height);
-    gl.uniform4f(uniform('uMotion'),values[2],values[3],values[4],values[5]);
-    gl.uniform4f(uniform('uClock'),values[0],values[1],values[7],values[6]);
+    const camera=previewCamera(values,width,height);
+    gl.uniform4f(uniform('uCamera'),camera.x,camera.y,camera.roll,camera.zoom);
+    gl.uniform4f(uniform('uMotion'),values[139],values[141],values[143],values[145]);
+    gl.uniform4f(uniform('uClock'),values[0],values[1],values[137],values[143]);
     gl.uniform4fv(uniform('uDynamics[0]'),values.subarray(135,147));
     gl.uniform3f(uniform('uAmbient'),values[8],values[9],values[10]);gl.uniform1f(uniform('uExposure'),values[11]);
     gl.uniform3f(uniform('uStripState'),values[132],values[133],values[134]);

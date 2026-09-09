@@ -11,8 +11,9 @@ import { paletteCss, paletteRgb, randomPalette, type ScenePalette } from "./pale
 import { MaterialLightLayer } from "./material-layer.js";
 import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface } from "./surface-mesh.js";
-import { deriveSceneDynamics } from "./scene-dynamics.js";
+import { deriveSceneDynamics, type SceneDynamics } from "./scene-dynamics.js";
 import { SceneAtmosphere } from "./scene-atmosphere.js";
+import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraAt } from "./scene-optics.js";
 import { audioFieldAt, audioFieldGeometry, drawAudioField } from "./audio-field.js";
 import { deriveMusicEffects, type MusicEffects, frequencyResponse } from "./music-effects.js";
 import {
@@ -131,6 +132,7 @@ export class VisualizerRenderer {
   private readonly ribbonPlan: RibbonPlan;
   private readonly vortexPlan: VortexPlan;
   private readonly resonancePlan: ResonancePlan;
+  private readonly echoPlan: ResonancePlan;
   private readonly stardust: Stardust[];
   private readonly width: number;
   private readonly height: number;
@@ -203,6 +205,7 @@ export class VisualizerRenderer {
     this.ribbonPlan = createRibbonPlan(this.seed);
     this.vortexPlan = createVortexPlan(this.seed, 7);
     this.resonancePlan = createResonancePlan(this.seed);
+    this.echoPlan = { ...this.resonancePlan, filaments: this.resonancePlan.filaments.filter((_, index) => index % 4 === 0) };
     const dustRandom = createRandom(deriveSeed(this.seed, "stardust"));
     this.stardust = Array.from({ length: 640 }, () => ({
       x: dustRandom(),
@@ -280,8 +283,9 @@ export class VisualizerRenderer {
 
   render(analysis: AudioAnalysis, time: number): Buffer {
     const frame = frameAt(analysis, time);
-    const motion = deriveMusicMotion(analysis, time);
-    const effects = deriveMusicEffects(motion, this.config.visual.lowFlash);
+    const dynamics = deriveSceneDynamics(analysis, time);
+    const motion = inertialMusicMotion(deriveMusicMotion(analysis, time), dynamics);
+    const effects = deriveMusicEffects(motion, this.config.visual.lowFlash, dynamics);
     const visual = deriveVisualState(analysis, time);
     const choreography = deriveChoreography(
       visual,
@@ -337,7 +341,6 @@ export class VisualizerRenderer {
       effects,
       novas,
     );
-    const dynamics = deriveSceneDynamics(analysis, time);
     const signal = audioFieldAt(analysis, time);
     const audioField = audioFieldGeometry(signal.spectrum, frame.waveform, signal.fast, signal.slow, dynamics.drift.clock);
     this.drawStardust(frame, visual, dynamics.cloud.clock);
@@ -353,7 +356,7 @@ export class VisualizerRenderer {
       this.layout.graphBottom - this.layout.graphTop,
     );
     context.clip();
-    this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    this.applyGraphCamera(context, dynamics);
     drawAudioField(context, this.layout, audioField, this.palette, false, this.config.visual.lowFlash);
     drawMaterialSurface(context, filaments, frame, motion, this.material,
       lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette),
@@ -378,9 +381,13 @@ export class VisualizerRenderer {
     context.restore();
 
     context.save();
-    this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    this.applyGraphCamera(context, dynamics);
     this.drawSupernovas(context, novas, effects, false);
     context.restore();
+
+    this.sceneAtmosphere.drawForeground(context, dynamics,
+      lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift,
+        this.config.visual.lowFlash, frame.spectrum, this.palette));
 
     this.drawPostEffects(
       Math.round(time * this.config.output.fps),
@@ -449,30 +456,10 @@ export class VisualizerRenderer {
       effects,
       novas,
     );
-    background.save();
-    background.globalCompositeOperation = "screen";
-    background.filter = `blur(7px) saturate(${effects.saturation})`;
-    background.globalAlpha =
-      (0.24 + grade.bloom * 0.85 + visual.peak * 0.08 + effects.glow * 0.2) *
-      (0.4 + choreography.layers.grade * 0.6) *
-      this.config.visual.intensity;
-    background.drawImage(this.emissionCanvas, 0, 0);
-    if (effects.dispersion > 0.015) {
-      const offset = this.backgroundWidth * effects.dispersion * 0.0035;
-      background.globalAlpha = effects.dispersion * 0.2;
-      background.filter = "blur(1.2px)";
-      background.drawImage(this.emissionCanvas, -offset, 0);
-      background.filter = "blur(1.2px)";
-      background.drawImage(this.emissionCanvas, offset, 0);
-    }
-    background.filter = "blur(2.4px)";
-    background.globalAlpha =
-      (0.34 + choreography.layers.spiral * 0.14) *
-      (0.5 + choreography.layers.grade * 0.5) *
-      this.config.visual.intensity;
-    background.drawImage(this.emissionCanvas, 0, 0);
-    background.filter = "none";
-    background.restore();
+    const dynamics = deriveSceneDynamics(analysis, time);
+    drawAtmosphericBloom(background, this.emissionCanvas, this.layout, this.width, this.height,
+      dynamics, (0.42 + effects.glow * 0.36 + dynamics.cloud.energy * 0.12) * this.config.visual.intensity,
+      effects.saturation, this.config.visual.lowFlash);
 
     const output = this.context;
     const camera = choreography.layers.camera;
@@ -514,7 +501,7 @@ export class VisualizerRenderer {
     if (this.artwork) drawArtwork(output, this.artwork, time, motion);
     const lightingStrength = this.config.visual.lighting ?? 0.65;
     const lights = lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette);
-    this.sceneAtmosphere.draw(output, deriveSceneDynamics(analysis, time), lights);
+    this.sceneAtmosphere.draw(output, dynamics, lights);
     if (lightingStrength > 0) {
       this.materialLight.draw(output, lights, lightingStrength);
       this.artworkLight?.draw(output, lights, lightingStrength, deriveArtworkMotion(time, motion).zoom);
@@ -522,13 +509,13 @@ export class VisualizerRenderer {
     this.frozenClouds.draw(output, analysis, time, (context, captureTime) => {
       const frozenFrame = frameAt(analysis, captureTime);
       const frozenVisual = deriveVisualState(analysis, captureTime);
-      const frozenMotion = deriveMusicMotion(analysis, captureTime);
-      const frozenEffects = deriveMusicEffects(frozenMotion, this.config.visual.lowFlash);
-      const frozenChoreography = deriveChoreography(frozenVisual, frozenFrame.onset, this.config.visual.lowFlash);
+      const frozenDynamics = deriveSceneDynamics(analysis, captureTime);
+      const frozenMotion = inertialMusicMotion(deriveMusicMotion(analysis, captureTime), frozenDynamics);
+      const frozenEffects = deriveMusicEffects(frozenMotion, this.config.visual.lowFlash, frozenDynamics);
       const frozenFilaments = createResonanceFilaments(this.resonancePlan, frozenFrame, frozenVisual,
         this.layout, captureTime, this.config.visual.lowFlash, frozenMotion);
       context.save();
-      this.applyGraphCamera(context, frozenFrame, frozenVisual, frozenChoreography, captureTime, frozenEffects);
+      this.applyGraphCamera(context, frozenDynamics);
       drawMaterialSurface(context, frozenFilaments, frozenFrame, frozenMotion, this.material,
         lightingAt(frozenMotion, captureTime, this.seed, this.palettePhase + frozenEffects.hueShift,
           this.config.visual.lowFlash, frozenFrame.spectrum, this.palette), this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
@@ -565,7 +552,7 @@ export class VisualizerRenderer {
     const context = this.slowBackgroundContext;
     const width = this.backgroundWidth;
     const height = this.backgroundHeight;
-    const effects = deriveMusicEffects(deriveMusicMotion(analysis, time), this.config.visual.lowFlash);
+    const effects = deriveMusicEffects(deriveMusicMotion(analysis, time), this.config.visual.lowFlash, deriveSceneDynamics(analysis, time));
     const baseHue = this.palettePhase + effects.hueShift * 0.5 + grade.hueShift * 0.15;
     const peakShade = 1 - visual.peak * 0.28;
 
@@ -766,7 +753,7 @@ export class VisualizerRenderer {
     const scaleY = this.backgroundHeight / this.height;
     context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     context.save();
-    this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    this.applyGraphCamera(context, deriveSceneDynamics(analysis, time));
     this.drawSupernovas(context, novas, effects, true);
     context.restore();
 
@@ -811,17 +798,17 @@ export class VisualizerRenderer {
       this.layout.graphBottom - this.layout.graphTop,
     );
     context.clip();
-    this.applyGraphCamera(context, frame, visual, choreography, time, effects);
+    this.applyGraphCamera(context, deriveSceneDynamics(analysis, time));
     if (time >= 0.18) {
       const echoTime = time - 0.18;
       const echoFrame = frameAt(analysis, echoTime);
       const echoVisual = deriveVisualState(analysis, echoTime);
-      const echoMotion = deriveMusicMotion(analysis, echoTime);
-      const echoEffects = deriveMusicEffects(echoMotion, this.config.visual.lowFlash);
-      const echo = createResonanceFilaments(this.resonancePlan, echoFrame, echoVisual,
-        this.layout, echoTime, this.config.visual.lowFlash, echoMotion)
-        .filter((_, index) => index % 4 === 0);
-      const opacity = smoothstep(0.18, 0.32, time) * (0.2 + motion.bassPulse * 0.14);
+      const echoDynamics = deriveSceneDynamics(analysis, echoTime);
+      const echoMotion = inertialMusicMotion(deriveMusicMotion(analysis, echoTime), echoDynamics);
+      const echoEffects = deriveMusicEffects(echoMotion, this.config.visual.lowFlash, echoDynamics);
+      const echo = createResonanceFilaments(this.echoPlan, echoFrame, echoVisual,
+        this.layout, echoTime, this.config.visual.lowFlash, echoMotion);
+      const opacity = smoothstep(0.18, 0.32, time) * (0.28 + effects.glow * 0.18);
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "back", echoMotion, echoEffects, opacity);
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "front", echoMotion, echoEffects, opacity);
     }
@@ -839,35 +826,17 @@ export class VisualizerRenderer {
 
   private applyGraphCamera(
     context: SKRSContext2D,
-    frame: AnalysisFrame,
-    visual: VisualState,
-    choreography: Choreography,
-    time: number,
-    effects: MusicEffects,
+    dynamics: SceneDynamics,
   ): void {
-    const camera = choreography.layers.camera;
-    const driftX =
-      Math.sin(time * 0.13 + visual.motion * 0.35 + this.palettePhase * 0.01) *
-      this.layout.width *
-      (0.0015 + camera * 0.005);
-    const driftY =
-      Math.cos(time * 0.1 + this.palettePhase * 0.014) *
-      this.layout.height *
-      (0.001 + camera * 0.003);
-    const roll =
-      this.ribbonPlan.direction * 0.018 + effects.rotation +
-      Math.sin(time * 0.18 + frame.centroid * Math.PI) *
-        (0.0008 + camera * 0.004) +
-      visual.trend * 0.0015;
-    const scale =
-      effects.zoom;
+    const pose = sceneCameraAt(dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction);
+    const halfY = Math.min(this.layout.horizon - this.layout.graphTop, this.layout.graphBottom - this.layout.horizon);
 
     context.translate(
-      this.layout.centerX + driftX,
-      this.layout.horizon + driftY,
+      this.layout.centerX + pose.x * this.layout.width / 2,
+      this.layout.horizon + pose.y * halfY,
     );
-    context.rotate(roll);
-    context.scale(scale, scale);
+    context.rotate(pose.roll);
+    context.scale(pose.zoom, pose.zoom);
     context.translate(-this.layout.centerX, -this.layout.horizon);
   }
 

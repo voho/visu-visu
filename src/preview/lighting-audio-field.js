@@ -1,4 +1,5 @@
 import { audioFieldGeometry } from '/audio-field-geometry.js';
+import { previewCamera } from '/lighting-camera.js';
 
 // The same RMS envelopes, bass-weighted spectral crown, and signed waveform
 // geometry as the MP4 scene, rendered as bounded antialiased GPU line quads.
@@ -56,15 +57,17 @@ void main() {
       width=nextWidth;height=nextHeight;
       for(const layer of layers)layer.length=0;
       const size=Math.min(width,height),portrait=width<height;
-      const scaleX=Math.min(width*0.43,size*0.53),scaleY=size*(portrait?0.39:0.31);
-      const centerX=width*(0.5+Math.sin(values[136]*0.17)*values[135]*0.005);
-      const centerY=height*((portrait?0.59:0.635)+Math.cos(values[136]*0.13)*values[135]*0.005);
+      const camera=previewCamera(values,width,height);
+      const scaleX=Math.min(width*0.43,size*0.53)*camera.zoom,scaleY=size*(portrait?0.39:0.31)*camera.zoom;
+      const centerX=width*camera.x,centerY=height*camera.y;
+      const cosine=Math.cos(camera.roll),sine=Math.sin(camera.roll);
       const baseWidth=Math.max(0.85,size*0.00115);
       const field=audioFieldGeometry(values.subarray(149,181),values.subarray(68,100),values[147],values[148],values[136]);
       function line(x1,y1,x2,y2,front,color,alpha,lineWidth) {
         const layer=layers[front?1:0];
-        x1=centerX+x1*scaleX;x2=centerX+x2*scaleX;
-        y1=centerY-y1*scaleY;y2=centerY-y2*scaleY;
+        const ax=x1*scaleX,ay=-y1*scaleY,bx=x2*scaleX,by=-y2*scaleY;
+        x1=centerX+ax*cosine-ay*sine;x2=centerX+bx*cosine-by*sine;
+        y1=centerY+ax*sine+ay*cosine;y2=centerY+bx*sine+by*cosine;
         const dx=x2-x1,dy=y2-y1,length=Math.hypot(dx,dy);
         if(length<1e-5)return;
         const nx=-dy/length*lineWidth*2.1,ny=dx/length*lineWidth*2.1;

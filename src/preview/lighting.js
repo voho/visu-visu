@@ -1,6 +1,9 @@
 import { createSculpture } from '/lighting-mesh.js';
 import { createFrozenHistory } from '/lighting-ghosts.js';
 import { createAudioField } from '/lighting-audio-field.js';
+import { previewCamera } from '/lighting-camera.js';
+import { createSculptureGlow } from '/lighting-glow.js';
+import { createDepthParticles } from '/lighting-particles.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -53,19 +56,14 @@ float cloudNoise(vec2 p) {
   p=mat2(1.6,1.2,-1.2,1.6)*p+1.7;
   return total+noise21(p)*0.15;
 }
-vec3 dustLayer(vec2 p,float grid,float clock,float energy,float depth) {
-  vec2 travel=vec2(clock*(0.027+depth*0.027),-clock*(0.018+depth*0.013));
-  vec2 coordinates=p*grid+travel;
-  vec2 cell=floor(coordinates);
-  float seed=hash21(cell+depth*12.3);
-  vec2 center=vec2(0.16+seed*0.68,0.16+fract(seed*43.17)*0.68);
-  vec2 distance=fract(coordinates)-center;
-  float radius=900.0/(1.0+depth*1.8+energy*depth*2.0);
-  float spot=exp(-dot(distance,distance)*radius);
-  float halo=exp(-dot(distance,distance)*radius*0.15)*0.035;
-  float twinkle=0.55+0.45*sin(seed*31.0+clock*(0.22+seed*0.18));
-  return mix(uLightColor[0],uLightColor[2],seed)*(spot+halo)*twinkle
-    *(0.032+energy*(0.055+depth*0.030));
+mat2 rotation(float angle) {
+  return mat2(cos(angle),sin(angle),-sin(angle),cos(angle));
+}
+vec3 blurredArtwork(vec2 uv,float radius) {
+  vec2 blur=vec2(radius/uArtworkAspect,radius);
+  return texture2D(uArtwork,uv).rgb*0.36
+    +(texture2D(uArtwork,uv+vec2(blur.x,0.0)).rgb+texture2D(uArtwork,uv-vec2(blur.x,0.0)).rgb
+    +texture2D(uArtwork,uv+vec2(0.0,blur.y)).rgb+texture2D(uArtwork,uv-vec2(0.0,blur.y)).rgb)*0.16;
 }
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution;
@@ -83,20 +81,21 @@ void main() {
   float detailEnergy=uDynamics[1].z, detailClock=uDynamics[1].w;
   float sparkEnergy=uDynamics[2].x, sparkClock=uDynamics[2].y;
   float impactEnergy=uDynamics[2].z;
-  p/=1.0+bodyEnergy*0.016+impactEnergy*0.008;
-  vec3 background = texture2D(uPalette,vec2(fract(driftClock*0.016),0.5)).rgb*0.038;
+  p/=1.0+bodyEnergy*0.030+impactEnergy*0.014;
+  vec3 background = texture2D(uPalette,vec2(fract(driftClock*0.035+cloudEnergy*0.12),0.5)).rgb*0.042;
   if (uHasArtwork > 0.5) {
     vec2 cover = uv - 0.5;
     if (aspect > uArtworkAspect) cover.y *= uArtworkAspect / aspect;
     else cover.x *= aspect / uArtworkAspect;
-    cover /= 1.045 + pulse * 0.009 + bass * 0.006 + bodyEnergy * 0.008;
-    cover += vec2(sin(driftClock*0.31),cos(driftClock*0.23))*0.0025*driftEnergy;
+    cover=rotation(sin(driftClock*0.22)*0.022)*cover;
+    cover /= 1.070 + bodyEnergy * 0.022 + impactEnergy * 0.010;
+    cover += vec2(sin(driftClock*0.31),cos(driftClock*0.23))*0.007*driftEnergy;
     // Artwork is uploaded premultiplied, so invisible RGB padding cannot leak
     // into palette-constrained colors through texture interpolation.
     vec4 artworkSample = texture2D(uArtwork, cover + 0.5);
-    vec3 art = artworkSample.rgb;
-    float luminance = dot(art, vec3(0.2126, 0.7152, 0.0722));
-    art = mix(vec3(luminance), art, 0.32);
+    float luminance = dot(artworkSample.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 art=blurredArtwork(cover+0.5,0.0018+cloudEnergy*0.0035);
+    art = mix(vec3(dot(art,vec3(0.2126,0.7152,0.0722))), art, 0.40+bodyEnergy*0.15);
     vec3 tint = normalize(uLightColor[0] + uLightColor[1] + vec3(0.8));
     float protection = 0.28 + 0.72 * smoothstep(0.12, 0.52, length(p));
     // Derive subtle relief from the artwork itself, so its detail catches the
@@ -110,35 +109,35 @@ void main() {
   }
   // Six causal timelines separate slowly gathered atmosphere from quick hits.
   // Cloud warping is broad and smooth; the cover remains visible through it.
-  vec2 cloudP=p*3.2+vec2(cloudClock*0.018,-cloudClock*0.012);
-  vec2 curl=vec2(cloudNoise(cloudP+driftClock*0.012),cloudNoise(cloudP+7.3-driftClock*0.009));
+  float textProtection=smoothstep(0.29,0.49,uv.y);
+  vec2 cloudP=rotation(cloudClock*0.038)*p*3.1+vec2(cloudClock*0.026,-cloudClock*0.018);
+  vec2 curl=vec2(cloudNoise(cloudP+driftClock*0.032),cloudNoise(cloudP+7.3-driftClock*0.021));
   float clouds=cloudNoise(cloudP+curl*1.65);
   float wisps=smoothstep(0.38,0.76,clouds);
   float aura=exp(-dot(p,p)*3.4);
-  vec3 cloudColor=mix(uLightColor[1],uLightColor[2],clamp(curl.x,0.0,1.0));
-  background+=cloudColor*wisps*aura*(0.032+cloudEnergy*0.094);
+  vec3 cloudColor=mix(uLightColor[1],uLightColor[2],clamp(curl.x+sin(bodyClock*0.09)*0.20,0.0,1.0));
+  background+=cloudColor*wisps*aura*(0.052+cloudEnergy*0.16)*textProtection;
+  vec2 curtainP=rotation(-driftClock*0.065)*p;
+  float curtain=pow(0.5+0.5*sin(curtainP.x*8.0+curl.y*3.8+cloudClock*0.20),6.0);
+  float curtainShape=exp(-pow(curtainP.y+sin(curtainP.x*2.7+driftClock*0.10)*0.25,2.0)*4.0);
+  background+=mix(uLightColor[0],uLightColor[2],curl.y)*curtain*curtainShape*aura*(0.024+cloudEnergy*0.055)*textProtection;
   background+=(uLightColor[0]*0.024+uLightColor[1]*0.025)*aura*(0.65+bodyEnergy*0.35);
   // A soft moving shadow anchors the light sculpture without hiding the cover.
   vec2 shadow=(p-vec2(sin(bodyClock*0.09)*0.02,-0.33))/vec2(0.31,0.065);
   background*=1.0-exp(-dot(shadow,shadow))*(0.10+bodyEnergy*0.06);
-  float textProtection=smoothstep(0.29,0.49,uv.y);
-  vec3 particles=dustLayer(p,24.0,sparkClock,sparkEnergy,0.15)
-    +dustLayer(p,13.0,detailClock,detailEnergy,0.55)
-    +dustLayer(p,6.0,bodyClock,bodyEnergy,1.0);
-  background+=particles*textProtection;
   // Point-local diffraction and expanding rings follow the decaying impact
   // envelope. Their total light stays restrained even during dense drum rolls.
   vec2 flarePosition=uLightPosition[0].xy*0.33+vec2(sin(bodyClock*0.08),cos(bodyClock*0.11))*0.018;
-  vec2 flare=p-flarePosition;
-  float halo=exp(-dot(flare,flare)*180.0);
-  float horizontal=exp(-abs(flare.x)*13.0-abs(flare.y)*900.0);
-  float vertical=exp(-abs(flare.x)*1000.0-abs(flare.y)*27.0);
+  vec2 flare=rotation(bodyClock*0.13+driftClock*0.2)*(p-flarePosition);
+  float halo=exp(-dot(flare,flare)*130.0);
+  float horizontal=exp(-abs(flare.x)*10.0-abs(flare.y)*620.0);
+  float vertical=exp(-abs(flare.x)*740.0-abs(flare.y)*21.0);
   float novaRadius=0.055+(1.0-impactEnergy)*0.19;
   float nova=exp(-abs(length(flare)-novaRadius)*200.0);
-  float frequency=texture2D(uFeatures,vec2(0.16,0.25)).r;
+  float frequency=bodyEnergy;
   vec3 flareColor=mix(uLightColor[0],uLightColor[2],0.20+sparkEnergy*0.16);
   float flareAmount=impactEnergy*uImpactLimit*(0.25+frequency*0.75);
-  background+=flareColor*(halo*0.20+horizontal*0.27+vertical*0.19+nova*0.030)
+  background+=flareColor*(halo*0.28+horizontal*0.35+vertical*0.24+nova*0.050)
     *flareAmount*textProtection;
   float vignette = 1.0 - smoothstep(0.25, 0.83, length((uv - 0.5) * vec2(1.1, 1.0)));
   background *= 0.48 + vignette * 0.52;
@@ -273,6 +272,8 @@ async function start() {
   if (!palette?.colors?.length) throw new Error('The preview profile does not include a scene palette. Restart the preview server.');
   const drawSculpture = createSculpture(gl, profile.hasArtwork);
   const audioField = createAudioField(gl, palette, profile.lowFlash);
+  const glow = createSculptureGlow(gl, (signal,width,height)=>drawSculpture(signal,width,height,0));
+  const drawParticles = createDepthParticles(gl);
   gl.useProgram(program);
   // Interpolate only the extracted (or seeded fallback) RGB swatches. No hue
   // rotations or unrelated material colors enter the rendered scene.
@@ -338,8 +339,8 @@ async function start() {
     sampleTimeline(captureTime, frozenValues);
     uploadSignals(frozenValues);
     drawSculpture(frozenValues, width, height, 0);
-    return [0.5 + Math.sin(frozenValues[136] * 0.17) * frozenValues[135] * 0.005,
-      (width < height ? 0.59 : 0.635) + Math.cos(frozenValues[136] * 0.13) * frozenValues[135] * 0.005];
+    const camera=previewCamera(frozenValues,width,height);
+    return [camera.x,camera.y];
   });
   const positions = new Float32Array(9);
   const colors = new Float32Array(9);
@@ -379,6 +380,7 @@ async function start() {
       // Capturing history temporarily uploads old FFT/material light data.
       // Restore the live textures and drawing state before painting this frame.
       uploadSignals(values);
+      if(mode===0)glow.capture(values,width,height);
       gl.useProgram(program); gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
       gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
       gl.viewport(0, 0, width, height); gl.uniform2f(uniform('uResolution'), width, height);
@@ -392,7 +394,7 @@ async function start() {
         powers[i * 2 + 1] = values[offset + 7];
       }
       gl.uniform1f(uniform('uTime'), values[0]);
-      gl.uniform4f(uniform('uMotion'), values[2], values[5], values[4], values[7]);
+      gl.uniform4f(uniform('uMotion'), values[139], values[145], values[143], values[137]);
       gl.uniform4fv(uniform('uDynamics[0]'), values.subarray(135, 147));
       gl.uniform3f(uniform('uAmbient'), values[8], values[9], values[10]);
       gl.uniform1f(uniform('uExposure'), values[11]);
@@ -401,9 +403,11 @@ async function start() {
       gl.uniform2fv(uniform('uLightPower[0]'), powers);
       gl.uniform1f(uniform('uView'), mode);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if(mode===0){glow.draw(values,width,height);drawParticles(values,width,height,false);}
       if (mode === 0) { audioField.update(values, width, height); audioField.draw(false); }
       if (mode === 0) history.draw(time, width, height);
       drawSculpture(values, width, height, mode);
+      if(mode===0)drawParticles(values,width,height,true);
       if (mode === 0) audioField.draw(true);
       frames++;
       window.lightingPreview.renderedFrames++;

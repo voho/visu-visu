@@ -112,9 +112,9 @@ describe("frozen cloud optical layer", () => {
       const full = alphaStats(pixels);
       expect(full.count).toBeGreaterThan(width * height * 0.2);
       expect(full.max).toBeGreaterThan(10);
-      // All three live ghosts together stay below one quarter opacity, even
+      // All three live ghosts together stay below one third opacity, even
       // when every captured surface is opaque white rather than lit sculpture.
-      expect(full.max).toBeLessThan(64);
+      expect(full.max).toBeLessThan(85);
     }
   });
 

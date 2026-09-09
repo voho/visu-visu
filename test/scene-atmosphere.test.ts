@@ -26,6 +26,7 @@ function render(layer: SceneAtmosphere, width: number, height: number, state: Sc
   context.fillStyle = "rgb(35,45,55)";
   context.fillRect(0, 0, width, height);
   layer.draw(context, state, lights);
+  layer.drawForeground(context, state, lights);
   return context.getImageData(0, 0, width, height).data;
 }
 
@@ -53,6 +54,7 @@ describe("tiered music atmosphere", () => {
       const transform = context.getTransform();
       const alpha = context.globalAlpha;
       layer.draw(context, dynamics(1, 16), lights);
+      layer.drawForeground(context, dynamics(1, 16), lights);
       expect(context.globalAlpha).toBe(alpha);
       expect(context.filter).toBe("blur(2px)");
       expect(context.globalCompositeOperation).toBe("source-over");
@@ -130,5 +132,97 @@ describe("tiered music atmosphere", () => {
     expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(2);
     expect(atmosphereParticleAt(particle, loud, 1920, 1080, 345).radius)
       .toBeGreaterThan(atmosphereParticleAt(fast, loud, 1920, 1080, 345).radius);
+  });
+
+  test("particles approach the viewer slowly, expand and soften before an invisible reset", () => {
+    const particle: AtmosphereParticle = {
+      tier: "spark", x: 0.85, y: 0.64, phase: 0, speed: 1, depth: 1, radius: 0.002,
+    };
+    const far = dynamics(0.5, 0);
+    far.spark.clock = 0.2 / 0.0016;
+    const near = { ...far, spark: { energy: 0.5, clock: 0.75 / 0.0016 } };
+    const a = atmosphereParticleAt(particle, far, 1920, 1080, 345);
+    const b = atmosphereParticleAt(particle, near, 1920, 1080, 345);
+    expect(b.depth).toBeGreaterThan(a.depth);
+    expect(b.radius).toBeGreaterThan(a.radius * 1.5);
+    expect(b.softness).toBeGreaterThan(a.softness);
+    expect(b.x - 960).toBeGreaterThan(a.x - 960);
+    expect(b.alpha).toBeGreaterThan(0.02);
+
+    const resetParticle = { ...particle, tier: "drift" as const };
+    const before = dynamics(1, 0);
+    before.drift.clock = (1 - 0.00001) / 0.035;
+    const after = { ...before, drift: { energy: 1, clock: (1 + 0.00001) / 0.035 } };
+    const outgoing = atmosphereParticleAt(resetParticle, before, 1920, 1080, 345);
+    const incoming = atmosphereParticleAt(resetParticle, after, 1920, 1080, 345);
+    expect(outgoing.depth).toBeGreaterThan(0.999);
+    expect(incoming.depth).toBeLessThan(0.001);
+    expect(outgoing.alpha).toBeLessThan(0.000001);
+    expect(incoming.alpha).toBeLessThan(0.000001);
+    // Fast spark clocks still produce slow depth travel between adjacent poses.
+    const next = { ...far, spark: { energy: 0.5, clock: far.spark.clock + 1 / 60 } };
+    expect(atmosphereParticleAt(particle, next, 1920, 1080, 345).depth - a.depth).toBeLessThan(0.0001);
+  });
+
+  test("every layer clock changes the visible atmosphere without accumulating history", () => {
+    const width = 640;
+    const height = 360;
+    const layer = new SceneAtmosphere(width, height, createSafeLayout(width, height), "layer-clocks");
+    const baseline = dynamics(0.8, 24);
+    const original = render(layer, width, height, baseline);
+    for (const tier of ["drift", "cloud", "body", "detail", "spark", "impact"] as const) {
+      const advanced = { ...baseline, [tier]: { ...baseline[tier], clock: baseline[tier].clock + 4 } };
+      expect(difference(original, render(layer, width, height, advanced))).toBeGreaterThan(0.004);
+      expect(render(layer, width, height, baseline)).toEqual(original);
+    }
+  });
+
+  test("cloud blends, bokeh and diffraction keep a grayscale artwork palette neutral", () => {
+    const width = 480;
+    const height = 270;
+    const layer = new SceneAtmosphere(width, height, createSafeLayout(width, height), "neutral-fx");
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(40,40,40)";
+    context.fillRect(0, 0, width, height);
+    const neutral = { ...lights, lights: lights.lights.map((light) => ({ ...light, color: [0.6, 0.6, 0.6] })) } as typeof lights;
+    layer.draw(context, dynamics(1, 18), neutral);
+    layer.drawForeground(context, dynamics(1, 18), neutral);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    let spread = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      spread = Math.max(spread, Math.abs(pixels[index]! - pixels[index + 1]!), Math.abs(pixels[index]! - pixels[index + 2]!));
+    }
+    expect(spread).toBeLessThanOrEqual(1);
+  });
+
+  test("near bokeh remains visible over an opaque sculpture and the foreground pass is seek safe", () => {
+    const width = 640;
+    const height = 360;
+    const layout = createSafeLayout(width, height);
+    const layer = new SceneAtmosphere(width, height, layout, "front-depth");
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext("2d");
+    const state = dynamics(0.9, 30);
+    layer.draw(context, state, lights);
+    // Stand-in for an opaque photo surface between the two atmosphere passes.
+    context.fillStyle = "rgb(35,45,55)";
+    context.fillRect(0, 0, width, height);
+    const covered = context.getImageData(0, 0, width, height).data;
+    layer.drawForeground(context, state, lights);
+    const foreground = context.getImageData(0, 0, width, height).data;
+    expect(difference(covered, foreground)).toBeGreaterThan(0.004);
+    let creditChanges = 0;
+    for (let y = 0; y + 1 <= layout.graphTop; y += 1) {
+      for (let x = 0; x < width * 4; x += 1) {
+        if (covered[y * width * 4 + x] !== foreground[y * width * 4 + x]) creditChanges += 1;
+      }
+    }
+    expect(creditChanges).toBe(0);
+    layer.drawForeground(context, dynamics(1, 240), lights);
+    context.fillStyle = "rgb(35,45,55)";
+    context.fillRect(0, 0, width, height);
+    layer.drawForeground(context, state, lights);
+    expect(context.getImageData(0, 0, width, height).data).toEqual(foreground);
   });
 });

@@ -102,11 +102,11 @@ export function frozenCloudAt(event: FrozenCloudCapture, time: number): FrozenCl
     // Constant motion in depth gives a gentle perspective approach. The
     // snapshot passes from its original plane toward the viewer without
     // rotating, changing shape, or reaching the camera's near plane.
-    scale: 1 / (1 - progress * 0.54),
-    opacity: 0.14 * event.strength * smoothstep(0, 0.6, age)
+    scale: 1 / (1 - progress * 0.55),
+    opacity: 0.20 * event.strength * smoothstep(0, 0.6, age)
       * Math.exp(-Math.max(0, age - 0.6) / 4.2) * endFade,
     // A recognizable ghost remains for the first second before turning to fog.
-    blur: 0.006 + 0.114 * smoothstep(1.1, FROZEN_CLOUD_LIFETIME, age),
+    blur: 0.006 + 0.214 * smoothstep(1.1, FROZEN_CLOUD_LIFETIME, age),
     dissolve: smoothstep(1.1, FROZEN_CLOUD_LIFETIME, age),
   };
 }

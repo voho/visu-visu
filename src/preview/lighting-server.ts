@@ -118,8 +118,12 @@ export function buildLightingTimeline(analysis: AudioAnalysis, seed: string, low
     const time = index / analysis.fps;
     const motion = deriveMusicMotion(analysis, time);
     const dynamics = deriveSceneDynamics(analysis, time);
-    const paletteHue = palette.anchorHue + dynamics.drift.clock * 9 + dynamics.cloud.energy * 12;
-    const state = lightingAt(motion, time, seed, paletteHue, lowFlash, analysis.frames[index]!.spectrum, palette);
+    const paletteHue = palette.anchorHue + dynamics.drift.clock * 22 + dynamics.cloud.energy * 18
+      + dynamics.body.energy * 24 + dynamics.detail.energy * 36 + dynamics.spark.energy * 12;
+    const lightMotion = { ...motion, bassEnergy: dynamics.body.energy, midEnergy: dynamics.detail.energy,
+      trebleEnergy: dynamics.spark.energy, bassPulse: dynamics.impact.energy,
+      treblePulse: dynamics.spark.energy, sustain: dynamics.cloud.energy };
+    const state = lightingAt(lightMotion, time, seed, paletteHue, lowFlash, analysis.frames[index]!.spectrum, palette);
     let offset = index * LIGHTING_TIMELINE_STRIDE;
     for (const value of [motion.slowTime, motion.fastTime, motion.bassEnergy, motion.midEnergy,
       motion.trebleEnergy, motion.bassPulse, motion.treblePulse, motion.sustain,
@@ -248,6 +252,9 @@ async function main(): Promise<void> {
     ["/lighting-mesh.js", resolve(import.meta.dir, "lighting-mesh.js")],
     ["/lighting-ghosts.js", resolve(import.meta.dir, "lighting-ghosts.js")],
     ["/lighting-audio-field.js", resolve(import.meta.dir, "lighting-audio-field.js")],
+    ["/lighting-camera.js", resolve(import.meta.dir, "lighting-camera.js")],
+    ["/lighting-glow.js", resolve(import.meta.dir, "lighting-glow.js")],
+    ["/lighting-particles.js", resolve(import.meta.dir, "lighting-particles.js")],
     ["/audio-field-geometry.js", resolve(import.meta.dir, "../render/audio-field-geometry.js")],
     ["/audio", options.audioPath],
     ["/albedo.png", resolve(import.meta.dir, "../../assets/materials/silk-albedo.png")],

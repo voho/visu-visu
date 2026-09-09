@@ -14,6 +14,10 @@ import type { AnalysisFrame } from "../src/types.js";
 import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
 import { prepareArtwork } from "../src/render/artwork.js";
 import { audioFieldAt } from "../src/render/audio-field.js";
+import { previewCamera } from "../src/preview/lighting-camera.js";
+import { deriveSceneDynamics } from "../src/render/scene-dynamics.js";
+import { deriveMusicMotion } from "../src/render/music-motion.js";
+import { lightingAt } from "../src/render/lighting.js";
 
 let directory: string;
 let audioPath: string;
@@ -175,6 +179,19 @@ describe("live lighting preview", () => {
     }
     expect(ghosts.envelope.at(-1)!.opacity).toBeLessThan(1e-10);
     expect(timeline.length / 60).toBe(181);
+    const dynamics = deriveSceneDynamics(analysis, 59 / 60);
+    const palette = randomPalette("test-lighting");
+    const lightMotion = { ...deriveMusicMotion(analysis, 59 / 60), bassEnergy: dynamics.body.energy,
+      midEnergy: dynamics.detail.energy, trebleEnergy: dynamics.spark.energy,
+      bassPulse: dynamics.impact.energy, treblePulse: dynamics.spark.energy, sustain: dynamics.cloud.energy };
+    const phase = palette.anchorHue + dynamics.drift.clock * 22 + dynamics.cloud.energy * 18
+      + dynamics.body.energy * 24 + dynamics.detail.energy * 36 + dynamics.spark.energy * 12;
+    const lights = lightingAt(lightMotion, 59 / 60, "test-lighting", phase, false, analysis.frames[59]!.spectrum, palette);
+    for (let light = 0; light < 3; light += 1) {
+      const offset = 59 * LIGHTING_TIMELINE_STRIDE + 12 + light * 8;
+      expect(timeline[offset + 6]!).toBeCloseTo(lights.lights[light]!.intensity, 6);
+      expect(timeline[offset + 7]!).toBeCloseTo(lights.lights[light]!.falloff, 6);
+    }
     const field = audioFieldAt(analysis, 59 / 60);
     const fieldOffset = 59 * LIGHTING_TIMELINE_STRIDE + 147;
     expect(timeline[fieldOffset]!).toBeCloseTo(field.fast, 6);
@@ -185,6 +202,22 @@ describe("live lighting preview", () => {
       expect(energy).toBeGreaterThanOrEqual(0);
       expect(energy).toBeLessThanOrEqual(1);
       expect(timeline[59 * LIGHTING_TIMELINE_STRIDE + 136 + layer * 2]!).toBeGreaterThan(0);
+    }
+  });
+
+  test("camera history coordinates survive capture resizing and broad motion stays bounded", () => {
+    const values = new Float32Array(LIGHTING_TIMELINE_STRIDE);
+    for (let index = 135; index < 147; index += 2) values[index] = 1;
+    for (let time = 0; time <= 180; time += 3) {
+      for (let index = 136; index < 147; index += 2) values[index] = time * (index - 134) * 0.15;
+      const camera = previewCamera(values, 1920, 1080);
+      expect(camera).toEqual(previewCamera(values, 480, 270));
+      expect(previewCamera(values, 390, 844)).toEqual(previewCamera(values, 195, 422));
+      expect(Math.abs(camera.roll)).toBeLessThanOrEqual(0.084);
+      expect(camera.zoom).toBeGreaterThan(0.84);
+      expect(camera.zoom).toBeLessThan(0.945);
+      expect(camera.x).toBeGreaterThan(0.485);
+      expect(camera.x).toBeLessThan(0.515);
     }
   });
 });

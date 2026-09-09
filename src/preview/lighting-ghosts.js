@@ -33,12 +33,18 @@ void main() {
   vec2 uv=gl_FragCoord.xy/uResolution;
   vec2 frozenUv=(uv-uCenter)/uScale+uCenter;
   vec2 blur=uBlur/uScale;
-  vec3 color=sampleAt(frozenUv)*0.24;
-  color+=(sampleAt(frozenUv+vec2(blur.x,0.0))+sampleAt(frozenUv-vec2(blur.x,0.0))
-    +sampleAt(frozenUv+vec2(0.0,blur.y))+sampleAt(frozenUv-vec2(0.0,blur.y)))*0.115;
-  vec2 diagonal=blur*0.70710678;
-  color+=(sampleAt(frozenUv+diagonal)+sampleAt(frozenUv-diagonal)
-    +sampleAt(frozenUv+vec2(diagonal.x,-diagonal.y))+sampleAt(frozenUv+vec2(-diagonal.x,diagonal.y)))*0.075;
+  // A weighted spiral distributes the wider blur over a disk without leaving
+  // the repeated cross-shaped contours of a few large offset samples.
+  vec3 color=sampleAt(frozenUv);
+  float total=1.0;
+  for(int i=0;i<16;i++) {
+    float radius=sqrt((float(i)+0.5)/16.0);
+    float angle=float(i)*2.39996323;
+    float weight=exp(-radius*radius*2.0);
+    color+=sampleAt(frozenUv+vec2(cos(angle),sin(angle))*blur*radius)*weight;
+    total+=weight;
+  }
+  color/=total;
   // Noise stays attached to the frozen image and only its threshold erodes.
   float erosion=noise(frozenUv*vec2(9.0,11.0))*0.68+noise(frozenUv*vec2(23.0,27.0))*0.32;
   float threshold=uDissolve*0.86-0.12;
