@@ -2,23 +2,29 @@
 
 `visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first, then renders every video frame from absolute time, cached features, and a seeded visual plan.
 
-The initial preset is **Rainbow Signal Dream**: a prismatic noise-and-bokeh field, flowing aurora ribbons, morphing halo and figure-eight forms, a forward-travelling spectrum tunnel, layered waveforms, music-triggered shockwaves and prism streaks, glints, vignette, and restrained grain. A deterministic visual conductor reads rolling energy, onset density, and build/drop trend so quiet passages open up, builds accelerate through depth, and peaks add trails, camera energy, and stronger hero shapes. Loudness controls exposure and breathing, bass expands the scene, mids bend its motion, treble sharpens detail, and spectral flux drives short color accents. Every layer is derived from absolute time and seeded analysis, so the result is reactive without sacrificing reproducibility. The only rendered text is the title and artist, placed with aspect-aware safe zones for TikTok, Instagram, YouTube, and Vimeo players.
+The initial preset is **Resonance**: a sculpture of 72 harmonic filaments that opens into a ring, closes toward an orb and folds into a flowing plasma knot. Broad 3D precession, flower-like lobes and changing proportions make its silhouette move with the song. Bass and kicks drive the largest folds and camera pulses; mids shape slower flow; high frequencies add smaller, faster ripples. Fast orbiters, contour tracers and glints move against 640 slowly drifting stars, faint orbital ribbon echoes and a soft nebula. Music changes color, saturation and bloom, with brief chromatic separation around transients.
 
-Text and signal graphics use an aspect-aware safe composition. Landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
+Kick-driven supernovas add a local flash, diffraction flares, outward particles and an expanding shockfront that leaves a decaying afterglow. High-frequency hits create smaller, faster flares. The bursts use separate attack and decay times, so sharp accents coexist with slower light trails and continuous sculpture motion. Low-flash mode softens their light while preserving the event timing, expanding geometry and musical movement.
 
-Every MP4 contains the song as stereo AAC-LC at 384 kbps and 48 kHz. This exceeds the requested 320 kbps quality while remaining more compatible with MP4 upload pipelines than an MP3 stream.
+Occasional bass accents also leave a frozen impression of the sculpture behind the live geometry. Each impression slowly enlarges, softens and dissolves over six seconds into a faint cloud. Its captured shape and colors stay still while the current sculpture keeps moving, adding depth without obscuring the music's sharper details.
+
+The deterministic conductor compares each section with the track's own energy range, then hands the scene between ambient, build, peak and release modes. Quiet passages leave space around the sculpture; builds add depth and camera motion; peaks increase deformation and light; releases soften the scene. Every layer is derived from absolute time, cached analysis and seeded plans, so the result remains reproducible. Large, high-contrast title and artist typography uses restrained letter spacing and aspect-aware safe zones for TikTok, Instagram, YouTube and Vimeo players.
+
+Title and artist are centered horizontally in the full frame, with their own symmetric text bounds. The sculpture uses a separate safe composition: landscape output reserves the hover-title and player-control bands; square and portrait output also reserve additional bottom space for captions and right-side space for TikTok/Reels action controls.
+
+Every MP4 contains the song as stereo AAC-LC at 48 kHz with a 384 kbps target bitrate.
 
 Picture and audio fade in together from black and silence over the first three seconds, then fade back to black and silence over the final three seconds. The fades happen inside the existing runtime; they do not add silent lead-in or tail time. Outputs shorter than six seconds divide their available duration evenly between the two ramps. Set `--fade 0` to disable them or `--fade <seconds>` to choose another duration.
 
-Final renders are high-fidelity upload masters: Canvas runs at the native delivery resolution, then FFmpeg encodes H.264 High Profile at CRF 8 with the slow preset, BT.709 color, two B-frames, and a closed half-frame-rate GOP. This is near-transparent rather than mathematically lossless, and intentionally produces larger, slower files that give YouTube and other platforms a cleaner source for their own transcode. The format follows [YouTube's recommended upload settings](https://support.google.com/youtube/answer/1722171); use preview quality while tuning.
+Final renders default to native **1920×1080 at 60 fps**, encoded as H.264 High Profile at CRF 18 with the `fast` preset, a 16 Mbps video ceiling and a 32 Mbit buffer. MP4 faststart, yuv420p pixels, BT.709 color, two B-frames and a closed half-second GOP provide an upload format with controlled file size. The 16 Mbps ceiling is this project's quality choice; [YouTube's recommended upload settings](https://support.google.com/youtube/answer/1722171) give 12 Mbps as the 1080p high-frame-rate reference. Use `--quality master` for an optional CRF 8, `slow`, uncapped archive copy.
 
 ## Showcase
 
-[![Rainbow Signal Dream generated from the loop fixture](./docs/showcase-loop.png)](./test-e2e/loop.mp4)
+[![Resonance generated from the loop fixture](./docs/showcase-loop.png)](./test-e2e/loop.mp4)
 
-[Watch the generated Full HD MP4](./test-e2e/loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
+[Watch the generated Full HD60 MP4](./test-e2e/loop.mp4) · [Source WAV fixture](./test-e2e/loop.wav)
 
-Regenerate the committed native Full HD upload-master showcase with `bun run showcase:loop`.
+Regenerate the committed native 1920×1080, 60 fps showcase with `bun run showcase:loop`. Run `bun run showcase:portrait` for a 1080×1920, 60 fps version in `renders/resonance-portrait-60.mp4`. Both display **RESONANCE** and **VISU VISU**. The six-second fixture uses short 0.5-second edge fades so its visuals remain useful as a demo; normal renders retain the three-second production default.
 
 ## Quick start
 
@@ -37,13 +43,11 @@ bun run render -- ./song.mp3 \
   --output ./renders/night-signal.mp4
 ```
 
-Every MP4 includes stereo AAC-LC audio at 48 kHz and a 384 kbps target bitrate. This exceeds the requested 320 kbps compressed-audio quality while retaining broad upload compatibility.
-
-The default is a native-resolution, high-fidelity Full HD master: `1920×1080` at 30 fps. Other delivery shapes retain a Full HD long edge when selected explicitly:
+The default is native Full HD at 60 fps with the compact upload profile. Choose landscape for YouTube or portrait for TikTok:
 
 ```sh
-bun run render -- ./song.mp3 --resolution fullhd --ratio 16:9
-bun run render -- ./song.mp3 --size 1920x1080
+bun run render -- ./song.mp3 --size 1920x1080 --fps 60 --quality final --output ./renders/youtube.mp4
+bun run render -- ./song.mp3 --size 1080x1920 --fps 60 --quality final --output ./renders/tiktok.mp4
 ```
 
 For a quick, eight-second draft:
@@ -54,13 +58,70 @@ bun run preview -- ./song.mp3 --overwrite
 
 The preview script still writes a `1920×1080` delivery file, but renders its Canvas scene at half scale and uses a faster quality profile. Set `--start 45` to inspect a later section.
 
-For a quick smoke test, one command writes a 640×360 draft to the ignored root-level `loop.mp4`:
+## Input artwork
+
+Pass a local PNG, JPEG, WebP or AVIF image to derive the scene's accent colors and add a subtle atmospheric texture:
+
+```sh
+bun run render -- ./song.wav --image ./cover.jpg \
+  --title "Night Signal" --artist "Artist Name" \
+  --output ./renders/night-signal.mp4
+
+bun run clip -- ./song.wav --image ./cover.jpg --artist "Artist Name"
+```
+
+The image is downsampled, desaturated, softened and reduced in contrast before it reaches the scene. Its texture sits mostly around the edges, with quiet areas behind the title, artist and main sculpture. A separate feathered image vignette gently fades the corners into the background. Slow breathing combines with a small, bass-triggered zoom of up to 1.2%, giving the image a restrained beat response without flashing its opacity.
+
+The artwork's tint and saturation follow the frequency mix continuously: bass produces the strongest color shift, with smaller contributions from mids and treble. The grading stays subtle, with at most a 9% saturation boost. A palette sampled from the image also supplies the sculpture's accents, while musical color changes and light effects remain active. The source artwork is not modified.
+
+Use `visual.imagePath` to store the image in a project config. Relative paths in that field resolve beside the config file; relative `--image` paths resolve from the current working directory and override the config value. Leave `imagePath` empty to use the procedural atmosphere alone. SVG and image URLs are not supported. Reproducible artwork renders require the same image bytes as well as the same audio and visual settings.
+
+## Smoke renders
+
+For a quick smoke test, one command writes a 640×360 draft with the fixture's short 0.5-second fades to the ignored root-level `loop.mp4`:
 
 ```sh
 bun run test:loop
 ```
 
-Use `bun run showcase:loop` when intentionally refreshing the committed Full HD showcase.
+Use `bun run showcase:loop` when intentionally refreshing the committed Full HD60 showcase, or `bun run showcase:portrait` to generate the vertical version.
+
+For a quick portrait clip smoke render using the real audio fixture:
+
+```sh
+bun run test:clip
+```
+
+This writes the ignored root-level `clip.mp4` with large **RESONANCE** and **VISU VISU** credits. The fixture is about six seconds long, so the clip uses the whole song with a quick intro and a three-second fade-out. Delivery remains 1080×1920 at 60 fps; preview encoding and a quarter-scale Canvas render keep this smoke test quick.
+
+## Automatic portrait clips
+
+The separate `clip` command selects a highlight and creates a portrait **1080×1920, 60 fps MP4**, using the same music-reactive renderer and upload encoding:
+
+```sh
+bun run clip -- ./song.mp3 --title "Night Signal" --artist "Artist Name"
+```
+
+By default it looks for a strong, sustained bass-heavy drop, starts about **five seconds before it**, and renders **up to 30 seconds**. The entrance fades in over 0.35 seconds; picture and audio fade out together over the final three seconds. Short artist names remain about 20 px high in a 360-pixel-wide portrait preview. Both credit lines are centered in the full frame, above the visualization.
+
+A loud isolated hit does not count as a drop: selection combines the immediate energy jump, contrast with the preceding section, and sustained energy after the hit. If no distinct drop is found, the command chooses the strongest sustained-energy window instead. This is an audio-feature heuristic; use `--dry-run` to inspect its choice or `--drop` for a known musical timestamp:
+
+```sh
+# Read the selected source range, drop offset, effective fades and output profile.
+bun run clip -- ./song.mp3 --artist "Artist Name" --dry-run
+
+# Known drop at 1:32.5: start at 1:27.5, with the drop five seconds into the clip.
+bun run clip -- ./song.mp3 --artist "Artist Name" --drop 92.5 --output ./renders/short.mp4
+
+# A shorter excerpt, with a different lead-in and end fade.
+bun run clip -- ./song.mp3 --artist "Artist Name" --duration 20 --lead-in 4 --fade-out 2
+```
+
+Title and artist come from `--title` / `--artist`, then project text settings, then audio tags. A missing title falls back to the filename; if the artist is still missing, the command asks for `--artist` instead of exporting an uncredited clip. Both lines use the existing large, high-contrast typography.
+
+Default output is `<song>.clip.mp4`. Use `--overwrite` to replace an existing file. Clips always use 9:16; `--resolution`, `--fps`, `--render-scale`, `--quality`, `--seed`, `--image`, `--config`, `--analysis` and `--save-analysis` remain available. The clip profile defaults to Full HD60 and `final` encoding even when the project config uses landscape dimensions or another frame rate. A reused analysis must match the selected frame rate and source file.
+
+A source shorter than the requested clip is used in full. Drops near the beginning get the available lead-in; drops near the end keep the requested lead-in and produce a shorter excerpt. Sources are never looped to fill time. Fades shorten when necessary to keep the chosen drop at full volume, with a brief hold before the end fade. Very short excerpts proportionally fit the entrance and exit fades without overlap. Normal clip durations round down to complete frames; a fractional final source frame can add less than one frame of padded delivery time, reported separately as `renderedDuration` in dry-run JSON. `--duration` accepts at most 30 seconds; omitted lead-in becomes half the duration for clips shorter than ten seconds.
 
 ## Deterministic two-stage processing
 
@@ -75,11 +136,11 @@ bun run render -- ./song.flac \
   --output ./renders/song.mp4
 ```
 
-The analysis contains time-indexed RMS, peak, a log-frequency spectrum, bass/mid/treble energy, spectral centroid, spectral flux, onset strength, and waveform samples. Track-level percentiles normalize these values before rendering.
+The analysis contains time-indexed RMS, peak, a log-frequency spectrum, bass/mid/treble energy, spectral centroid, spectral flux, onset strength, and waveform samples. Track-level percentiles normalize these values before rendering. RMS attack and release use elapsed time so their response stays consistent across frame rates. Rhythm and beat controls use time-based onset envelopes; a flat onset peak fires once at its leading edge. Separate normalized band envelopes and integrated slow/fast musical time let sustained forms and rapid details respond at different speeds without jumping when the song's energy changes. Supernovas and flares have a cached event plan built from positive frequency-band changes: an event never precedes its audio timestamp, and its expansion and decay depend only on its absolute age.
 
-Cached analysis is bound to the exact source file as well as its decoded PCM. The renderer rejects a cache paired with another audio file, malformed feature values, unsupported versions, or inconsistent frame counts. JSON caches are capped at 128 MiB in this first format; longer-form sets should currently be analyzed as part of the render instead of saved.
+Cached analysis is bound to the exact source file as well as its decoded PCM. The current analysis version remains **2**; regenerate older versions with `bun run analyze`. A cache must also match the output frame rate, so regenerate a 24 or 30 fps cache for a 60 fps render. The renderer rejects a cache paired with another audio file, malformed feature values, unsupported versions, or inconsistent frame counts. JSON caches are capped at 128 MiB; longer-form sets should currently be analyzed as part of the render instead of saved.
 
-With the same decoded audio, settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
+With the same decoded audio, input image bytes (if supplied), settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **12**; analysis remains at version **2**. The automatic seed is derived from decoded PCM and output settings. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
 
 ## Project configuration
 
@@ -95,10 +156,11 @@ bun run render -- ./song.wav --config ./visu.config.json
   "output": {
     "width": 1920,
     "height": 1080,
-    "fps": 30,
+    "fps": 60,
     "renderScale": 1,
-    "crf": 8,
-    "preset": "slow",
+    "crf": 18,
+    "preset": "fast",
+    "maxBitrateMbps": 16,
     "fadeSeconds": 3
   },
   "text": {
@@ -107,6 +169,7 @@ bun run render -- ./song.wav --config ./visu.config.json
   },
   "visual": {
     "seed": "auto",
+    "imagePath": "",
     "intensity": 1,
     "bokehCount": 48,
     "spectrumBands": 64,
@@ -134,29 +197,41 @@ Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `fadeSeconds` controls synchronized picture-to-black and audio-to-silence ramps at both ends. Audio is timestamp-reset after source seeking, padded if frame quantization extends past the available source by a fraction of a frame, and trimmed to the exact video duration before fading.
 
-`renderScale` controls the internal Canvas resolution independently of the encoded resolution. Final quality defaults to `1`, so a Full HD master is drawn natively at `1920×1080` with no source upscale. `--quality preview` switches to a half-scale Canvas, CRF 20, and the `veryfast` encoder preset while still producing the requested delivery dimensions. Explicit `--quality final` restores native scale, CRF 8, and the `slow` preset even when a project config contains draft settings.
+`renderScale` controls the internal Canvas resolution independently of the encoded resolution. Final quality defaults to `1`, so Full HD is drawn natively at `1920×1080`. Quality presets replace the encoding settings and choose a render scale:
+
+| Quality | Render scale | CRF | H.264 preset | Video ceiling |
+| --- | ---: | ---: | --- | ---: |
+| `--quality final` | `1` | `18` | `fast` | `16 Mbps` |
+| `--quality preview` | `0.5` | `22` | `veryfast` | `8 Mbps` |
+| `--quality master` | `1` | `8` | `slow` | uncapped |
+
+All modes retain the configured frame rate, which defaults to 60 fps. An explicit `--render-scale` takes precedence over the preset's scale. The archive mode is lossy CRF encoding and produces larger files than the upload profile.
+
+The optional `output.maxBitrateMbps` config field defaults to `16`, accepts finite values from `0` to `200`, and sets FFmpeg's video VBV ceiling in Mbps. The buffer is twice that value in Mbits; `0` disables the ceiling for uncapped CRF encoding. Actual average bitrate and file size depend on the scene. Omit `--quality` when retaining custom encoding settings from a project config.
 
 ## Platform-safe composition
 
-Fog and bokeh remain full bleed, but title, artist, waveform, spectrum, and analysis bars stay inside conservative player-safe rectangles:
+Nebula, bokeh, stardust and glints fill the frame. Processed artwork and dissolving sculpture clouds sit behind the sharp geometry and leave the text area quiet. The sculpture, orbital ribbon echoes and rings use a clipped graph region, while title and artist occupy a separate symmetric safe text region:
 
-| Output shape | Content bounds | Graph bounds |
+| Output shape | Text width | Graph bounds |
 | --- | --- | --- |
-| Landscape | `x 8–92%`, `y 16–80%` | `y 40–72%` |
-| Square | `x 8–80%`, `y 16–62%` | `y 38–60%` |
-| Portrait | `x 12–76%`, `y 16–62%` | `y 38–60%` |
+| Landscape | `x 8–92%` | `x 8–92%`, `y 32–78%` |
+| Square | `x 8–92%` | `x 8–80%`, `y 30–60%` |
+| Portrait | `x 12–88%` | `x 12–76%`, `y 30–60%` |
 
-Vertical and square outputs reserve extra room for captions, progress controls, and right-side reaction/action buttons. Long title and artist strings are measured, centered, scaled to the safe width, and clipped to the upper text region as a final guard.
+Both credit lines share the exact horizontal midpoint of the video. Vertical and square graph bounds reserve extra room for captions, progress controls, and right-side reaction/action buttons. Long title and artist strings are measured, scaled to their symmetric safe width, and clipped to the upper text region as a final guard.
 
 Useful platform renders:
 
 ```sh
 # TikTok / Instagram Reels / YouTube Shorts
-bun run render -- ./song.wav --resolution fullhd --ratio 9:16
+bun run render -- ./song.wav --resolution fullhd --ratio 9:16 --fps 60 --quality final --output ./renders/portrait.mp4
 
 # YouTube / Vimeo landscape
-bun run render -- ./song.wav --resolution fullhd --ratio 16:9
+bun run render -- ./song.wav --resolution fullhd --ratio 16:9 --fps 60 --quality final --output ./renders/landscape.mp4
 ```
+
+The portrait profile fits [TikTok's media transfer specifications](https://developers.tiktok.com/docs/en/content-posting-api-media-transfer-guide), which recommend MP4/H.264 and accept 23–60 fps with each dimension between 360 and 4096 pixels.
 
 Run `bun src/cli.ts --help` for every option.
 
@@ -170,7 +245,7 @@ song
                  └─ FFmpeg H.264 + original audio AAC → .mp4
 ```
 
-The renderer never reads wall-clock time and never calls `Math.random()`. Aurora, bokeh, sparkles, fog, and onset prism events have fixed seeded identities and analytic motion. The section conductor, halo, travelling tunnel, shockwave, spectrum, orbital form, and waveform layers read current, future, or historical analysis frames by absolute timestamp. This keeps direct seeking deterministic and leaves future parallel frame rendering possible.
+The renderer never reads wall-clock time and never calls `Math.random()`. Filaments, tracers, nebula lobes, bokeh, stardust, glints, orbital effects, onset accents and grain use seeded plans or analytic motion. Slow and fast musical time come from cached prefix integrals of audio envelopes, so speed can react to the song while direct seeking follows the same path. Slow atmosphere is cached in frame-aligned buckets with source-analysis identity checks. Frozen clouds use a sparse bass-event plan: each small cached snapshot is rebuilt from its event's fixed capture time, then zoomed, blurred and dissolved by its absolute age. Bloom is rebuilt for each frame and uses the sculpture's camera transform to stay aligned with the emitting geometry. The conductor and all music-reactive layers read analysis by absolute timestamp, keeping direct seeking deterministic and leaving future parallel frame rendering possible.
 
 See [docs/architecture.md](./docs/architecture.md) for module boundaries and the intended studio evolution.
 
@@ -178,14 +253,26 @@ See [docs/architecture.md](./docs/architecture.md) for module boundaries and the
 
 ```sh
 bun run typecheck
-bun test
+bun run test
 bun run check
 ```
 
-Tests cover the FFT, normalized analysis, strict cache validation, aspect-aware safe zones, configuration, seeded randomness, repeatable RGBA rendering, and an FFmpeg/ffprobe A/V integration render. A practical smoke test is a short preview followed by:
+`bun run test` runs the regular suite in `test/`; `bun run check` runs type checking and that same suite. Tests cover the FFT, normalized analysis, frame-rate-aware envelopes, onset timing, strict cache validation, adaptive section choreography, slow/fast music motion, frequency-weighted effects, centered credits and aspect-aware graph bounds, changing resonance silhouettes and orbital geometry, supernova causality and decay, frozen-cloud capture timing and deterministic dissolution, artwork preprocessing, vignette, beat zoom, frequency tint and path handling, low-flash motion preservation, music-reactive grading, configuration, seeded randomness and repeatable RGBA rendering. Real FFmpeg tests encode and decode native landscape and portrait Full HD60 videos, checking each distinct frame, A/V timing, upload codecs and color, bitrate limits and faststart.
+
+Run the longer CLI-to-MP4 clip test separately:
+
+```sh
+bun run test:e2e:clip
+# All tests in test-e2e/:
+bun run test:e2e
+```
+
+The automated clip E2E generates a longer audio fixture with a known drop and passes a busy cover image through the public `clip --image` CLI. It checks a 30-second portrait MP4, the drop five seconds into the excerpt, all 1,800 frames at 60 fps, H.264/AAC encoding, matching audio/video duration, song and artist metadata, and decoded picture/audio fades. Both credit lines must remain visible and horizontally centered in a decoded 360-pixel-wide portrait preview with the artwork present. Output uses the default 1080×1920 delivery size with a quarter-scale internal render to limit test time. This verifies full-length clip selection and export; `bun run test:clip` is the shorter, six-second real-audio smoke render for visual inspection. Both require FFmpeg and FFprobe on `PATH`. Bare `bun test` discovers both suites, including the longer E2E.
+
+For a manual output check:
 
 ```sh
 ffprobe -v error -show_streams -show_format ./renders/example.mp4
 ```
 
-Start with `bun run test:loop` or the preview preset while tuning a seed, title, and composition. Use final quality for the upload artifact; native-resolution CRF 8 encoding is deliberately slower and larger.
+Start with `bun run test:loop` or the preview preset while tuning a seed, title, and composition. Use final quality for upload and master quality when keeping an additional archive copy.

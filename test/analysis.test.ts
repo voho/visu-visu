@@ -44,4 +44,22 @@ describe("audio analysis", () => {
     expect(frameAt(analysis, -10)).toBe(analysis.frames[0]!);
     expect(frameAt(analysis, 99)).toBe(analysis.frames.at(-1)!);
   });
+
+  test("keeps the same RMS attack and release times at 12 and 60 fps", () => {
+    const pcm = sinePcm(440, 4);
+    for (let index = 0; index < pcm.samples.length; index += 1) {
+      if (index < pcm.sampleRate || index >= pcm.sampleRate * 2) pcm.samples[index] = 0;
+    }
+    const slow = analyzeAudio(pcm, 12, 64);
+    const fast = analyzeAudio(pcm, 60, 64);
+
+    expect(Math.abs(frameAt(slow, 1.25).rms - frameAt(fast, 1.25).rms)).toBeLessThan(0.03);
+    // Both windows are completely silent here, so the relative fall measures
+    // release duration without depending on FFT placement at the transition.
+    const slowRelease = frameAt(slow, 2.5).rms / frameAt(slow, 2.25).rms;
+    const fastRelease = frameAt(fast, 2.5).rms / frameAt(fast, 2.25).rms;
+    expect(slowRelease).toBeGreaterThan(0.4);
+    expect(slowRelease).toBeLessThan(0.5);
+    expect(slowRelease).toBeCloseTo(fastRelease, 10);
+  });
 });

@@ -11,11 +11,16 @@
     "analyze": "bun src/cli.ts analyze",
     "render": "bun src/cli.ts render",
     "preview": "bun src/cli.ts render --duration 8 --quality preview",
-    "test:loop": "bun src/cli.ts render test-e2e/loop.wav --output loop.mp4 --size 640x360 --fps 24 --quality preview --seed loop-smoke --overwrite",
-    "showcase:loop": "bun src/cli.ts render test-e2e/loop.wav --output test-e2e/loop.mp4 --resolution fullhd --ratio 16:9 --fps 24 --quality final --seed loop-smoke --overwrite",
-    "test": "bun test",
+    "test:loop": "bun src/cli.ts render test-e2e/loop.wav --output loop.mp4 --size 640x360 --fps 24 --quality preview --seed loop-smoke --fade 0.5 --overwrite",
+    "test:clip": "bun src/cli.ts clip test-e2e/loop.wav --output clip.mp4 --title \"RESONANCE\" --artist \"VISU VISU\" --seed loop-smoke --quality preview --render-scale 0.25 --overwrite",
+    "showcase:loop": "bun src/cli.ts render test-e2e/loop.wav --output test-e2e/loop.mp4 --resolution fullhd --ratio 16:9 --fps 60 --quality final --seed loop-smoke --title \"RESONANCE\" --artist \"VISU VISU\" --fade 0.5 --overwrite",
+    "test": "bun test ./test",
+    "test:e2e": "bun test ./test-e2e",
+    "test:e2e:clip": "bun test ./test-e2e/clip.e2e.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun test"
+    "check": "bun run typecheck && bun run test",
+    "showcase:portrait": "bun src/cli.ts render test-e2e/loop.wav --output renders/resonance-portrait-60.mp4 --resolution fullhd --ratio 9:16 --fps 60 --quality final --seed loop-smoke --title \"RESONANCE\" --artist \"VISU VISU\" --fade 0.5 --overwrite",
+    "clip": "bun src/cli.ts clip"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2"

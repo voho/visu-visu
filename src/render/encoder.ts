@@ -12,6 +12,8 @@ interface EncoderOptions {
   config: ProjectConfig;
   start: number;
   duration: number;
+  fadeInSeconds?: number;
+  fadeOutSeconds?: number;
   frameCount: number;
   inputWidth: number;
   inputHeight: number;
@@ -21,6 +23,31 @@ interface EncoderOptions {
 interface ExitStatus {
   code: number | null;
   signal: NodeJS.Signals | null;
+}
+
+/** Fit explicitly requested fades into a short excerpt without overlapping them. */
+export function resolveFadeDurations(
+  duration: number,
+  defaultFadeSeconds: number,
+  fadeInSeconds?: number,
+  fadeOutSeconds?: number,
+): { fadeIn: number; fadeOut: number } {
+  for (const [name, value] of [
+    ["fadeInSeconds", fadeInSeconds],
+    ["fadeOutSeconds", fadeOutSeconds],
+  ] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 30)) {
+      throw new Error(`${name} must be a finite number between 0 and 30`);
+    }
+  }
+  if (fadeInSeconds === undefined && fadeOutSeconds === undefined) {
+    const fade = Math.min(defaultFadeSeconds, duration / 2);
+    return { fadeIn: fade, fadeOut: fade };
+  }
+  const fadeIn = fadeInSeconds ?? defaultFadeSeconds;
+  const fadeOut = fadeOutSeconds ?? defaultFadeSeconds;
+  const scale = fadeIn + fadeOut > duration ? duration / (fadeIn + fadeOut) : 1;
+  return { fadeIn: fadeIn * scale, fadeOut: fadeOut * scale };
 }
 
 export class FfmpegEncoder {
@@ -45,6 +72,18 @@ export class FfmpegEncoder {
   }
 
   static async create(options: EncoderOptions): Promise<FfmpegEncoder> {
+    if (!Number.isFinite(options.start) || options.start < 0) {
+      throw new Error("Start time must be a finite number greater than or equal to zero");
+    }
+    if (!Number.isFinite(options.duration) || options.duration <= 0) {
+      throw new Error("Render duration must be a finite number greater than zero");
+    }
+    const { fadeIn, fadeOut } = resolveFadeDurations(
+      options.duration,
+      options.config.output.fadeSeconds,
+      options.fadeInSeconds,
+      options.fadeOutSeconds,
+    );
     const outputPath = resolve(options.outputPath);
     await mkdir(dirname(outputPath), { recursive: true });
     if (!options.overwrite) {
@@ -57,8 +96,7 @@ export class FfmpegEncoder {
     }
     const { output } = options.config;
     const gopFrames = Math.max(1, Math.round(output.fps / 2));
-    const fadeDuration = Math.min(output.fadeSeconds, options.duration / 2);
-    const fadeOutStart = Math.max(0, options.duration - fadeDuration);
+    const fadeOutStart = Math.max(0, options.duration - fadeOut);
     const videoFilters = [
       `scale=${output.width}:${output.height}:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:out_color_matrix=bt709`,
     ];
@@ -68,15 +106,13 @@ export class FfmpegEncoder {
       `apad=whole_dur=${options.duration.toFixed(6)}`,
       `atrim=start=0:end=${options.duration.toFixed(6)}`,
     ];
-    if (fadeDuration > 0) {
-      videoFilters.push(
-        `fade=t=in:st=0:d=${fadeDuration.toFixed(6)}:color=black`,
-        `fade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeDuration.toFixed(6)}:color=black`,
-      );
-      audioFilters.push(
-        `afade=t=in:st=0:d=${fadeDuration.toFixed(6)}:curve=tri:silence=0`,
-        `afade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeDuration.toFixed(6)}:curve=tri:silence=0`,
-      );
+    if (fadeIn > 0) {
+      videoFilters.push(`fade=t=in:st=0:d=${fadeIn.toFixed(6)}:color=black`);
+      audioFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}:curve=tri:silence=0`);
+    }
+    if (fadeOut > 0) {
+      videoFilters.push(`fade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeOut.toFixed(6)}:color=black`);
+      audioFilters.push(`afade=t=out:st=${fadeOutStart.toFixed(6)}:d=${fadeOut.toFixed(6)}:curve=tri:silence=0`);
     }
     videoFilters.push("format=yuv420p", "setsar=1");
     const args = [
@@ -113,6 +149,14 @@ export class FfmpegEncoder {
       videoFilters.join(","),
     );
     args.push("-af", audioFilters.join(","));
+    if (output.maxBitrateMbps > 0) {
+      args.push(
+        "-maxrate",
+        `${output.maxBitrateMbps}M`,
+        "-bufsize",
+        `${output.maxBitrateMbps * 2}M`,
+      );
+    }
     args.push(
       "-c:v",
       "libx264",

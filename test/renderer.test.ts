@@ -46,6 +46,67 @@ describe("visualizer renderer", () => {
       firstDigest,
     );
 
+    const quietAnalysis = analyzeAudio(
+      {
+        ...pcm,
+        samples: new Float32Array(sampleRate),
+        sourceHash: "quiet",
+        sourceFileHash: "quiet-file",
+      },
+      12,
+      32,
+    );
+    const statefulRenderer = new VisualizerRenderer(config, "state-seed");
+    statefulRenderer.render(quietAnalysis, 0.5);
+    statefulRenderer.render(analysis, 0.5);
+    const afterQuietAndPeak = statefulRenderer.render(analysis, 0.5);
+    const freshPeak = new VisualizerRenderer(config, "state-seed").render(analysis, 0.5);
+    expect(digest(afterQuietAndPeak)).toBe(digest(freshPeak));
+
+    // Re-analysis of the same source can retain hashes and frame count while
+    // changing features. Background caches must follow the analysis object.
+    const reanalyzed = structuredClone(quietAnalysis);
+    reanalyzed.sourceHash = analysis.sourceHash;
+    reanalyzed.sourceFileHash = analysis.sourceFileHash;
+    const reused = new VisualizerRenderer(config, "analysis-identity");
+    reused.render(analysis, 0.5);
+    const switched = reused.render(reanalyzed, 0.5);
+    const isolated = new VisualizerRenderer(config, "analysis-identity").render(reanalyzed, 0.5);
+    expect(digest(switched)).toBe(digest(isolated));
+
+    const highFrequencyAnalysis = analyzeAudio(
+      {
+        ...pcm,
+        samples: Float32Array.from({ length: sampleRate }, (_, index) =>
+          Math.sin((2 * Math.PI * 6_000 * index) / sampleRate) * 0.55,
+        ),
+        sourceHash: "high-frequency",
+        sourceFileHash: "high-frequency-file",
+      },
+      12,
+      32,
+    );
+    const lowFrequencyFrame = new VisualizerRenderer(config, "frequency-seed").render(
+      analysis,
+      0.5,
+    );
+    const highFrequencyFrame = new VisualizerRenderer(config, "frequency-seed").render(
+      highFrequencyAnalysis,
+      0.5,
+    );
+    let pixelDifference = 0;
+    let channelCount = 0;
+    for (let index = 0; index < lowFrequencyFrame.length; index += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        pixelDifference += Math.abs(
+          (lowFrequencyFrame[index + channel] ?? 0) -
+            (highFrequencyFrame[index + channel] ?? 0),
+        );
+        channelCount += 1;
+      }
+    }
+    expect(pixelDifference / channelCount).toBeGreaterThan(0.25);
+
     const portraitConfig = parseProjectConfig({
       output: { width: 180, height: 320, fps: 12 },
       text: { title: "Portrait Signal", artist: "Test" },

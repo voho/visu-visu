@@ -3,10 +3,11 @@
   "output": {
     "width": 1920,
     "height": 1080,
-    "fps": 30,
+    "fps": 60,
     "renderScale": 1,
-    "crf": 8,
-    "preset": "slow",
+    "crf": 18,
+    "preset": "fast",
+    "maxBitrateMbps": 16,
     "fadeSeconds": 3
   },
   "text": {
@@ -15,6 +16,7 @@
   },
   "visual": {
     "seed": "auto",
+    "imagePath": "",
     "intensity": 1,
     "bokehCount": 48,
     "spectrumBands": 64,

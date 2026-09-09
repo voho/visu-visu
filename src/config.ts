@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { ProjectConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: ProjectConfig = {
@@ -7,10 +7,11 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   output: {
     width: 1920,
     height: 1080,
-    fps: 30,
+    fps: 60,
     renderScale: 1,
-    crf: 8,
-    preset: "slow",
+    crf: 18,
+    preset: "fast",
+    maxBitrateMbps: 16,
     fadeSeconds: 3,
   },
   text: {
@@ -18,6 +19,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     artist: "",
   },
   visual: {
+    imagePath: "",
     seed: "auto",
     intensity: 1,
     bokehCount: 48,
@@ -80,6 +82,16 @@ function booleanValue(value: unknown, fallback: boolean, label: string): boolean
   return value;
 }
 
+/** Artwork deliberately accepts files only; loading a project never fetches URLs. */
+export function resolveArtworkPath(imagePath: string, baseDirectory = process.cwd()): string {
+  const path = imagePath.trim();
+  if (!path) return "";
+  if (/^[a-z][a-z\d+.-]*:/i.test(path) || path.startsWith("//")) {
+    throw new Error("visual.imagePath / --image must be a local file path, not a URL");
+  }
+  return resolve(baseDirectory, path);
+}
+
 export function parseProjectConfig(value: unknown): ProjectConfig {
   if (!isRecord(value)) throw new Error("Configuration must be a JSON object");
   if (value.version !== undefined && value.version !== 1) {
@@ -109,6 +121,9 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
   if (width % 2 !== 0 || height % 2 !== 0) {
     throw new Error("output.width and output.height must be even for H.264 encoding");
   }
+  const imagePath = stringValue(visual.imagePath, "", "visual.imagePath").trim();
+  // Validate without resolving here: JSON paths belong to their config's directory.
+  if (imagePath) resolveArtworkPath(imagePath);
 
   return {
     version: 1,
@@ -125,6 +140,13 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       ),
       crf: integer(output.crf, DEFAULT_CONFIG.output.crf, "output.crf", 0, 51),
       preset: preset as ProjectConfig["output"]["preset"],
+      maxBitrateMbps: boundedNumber(
+        output.maxBitrateMbps,
+        DEFAULT_CONFIG.output.maxBitrateMbps,
+        "output.maxBitrateMbps",
+        0,
+        200,
+      ),
       fadeSeconds: boundedNumber(
         output.fadeSeconds,
         DEFAULT_CONFIG.output.fadeSeconds,
@@ -138,6 +160,7 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       artist: stringValue(text.artist, DEFAULT_CONFIG.text.artist, "text.artist").trim(),
     },
     visual: {
+      imagePath,
       seed: stringValue(visual.seed, DEFAULT_CONFIG.visual.seed, "visual.seed").trim() || "auto",
       intensity: boundedNumber(
         visual.intensity,
@@ -191,7 +214,9 @@ export async function loadProjectConfig(configPath?: string): Promise<ProjectCon
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not parse config ${absolutePath}: ${message}`);
   }
-  return parseProjectConfig(parsed);
+  const config = parseProjectConfig(parsed);
+  config.visual.imagePath = resolveArtworkPath(config.visual.imagePath ?? "", dirname(absolutePath));
+  return config;
 }
 
 export function parseSize(value: string): { width: number; height: number } {

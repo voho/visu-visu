@@ -1,5 +1,5 @@
-export const ANALYSIS_VERSION = 1;
-export const RENDERER_VERSION = 5;
+export const ANALYSIS_VERSION = 2;
+export const RENDERER_VERSION = 12;
 
 export interface OutputConfig {
   width: number;
@@ -8,6 +8,8 @@ export interface OutputConfig {
   renderScale: number;
   crf: number;
   preset: "ultrafast" | "veryfast" | "fast" | "medium" | "slow";
+  /** Video bitrate ceiling in Mbps; 0 leaves CRF encoding uncapped. */
+  maxBitrateMbps: number;
   fadeSeconds: number;
 }
 
@@ -17,6 +19,8 @@ export interface TextConfig {
 }
 
 export interface VisualConfig {
+  /** Optional local artwork, softened and masked behind the scene. */
+  imagePath?: string;
   seed: string;
   intensity: number;
   bokehCount: number;
@@ -72,5 +76,7 @@ export interface RenderRequest {
   config: ProjectConfig;
   start: number;
   duration?: number;
+  fadeInSeconds?: number;
+  fadeOutSeconds?: number;
   overwrite: boolean;
 }

@@ -134,12 +134,15 @@ export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number):
   const normalizedFlux = rawFrames.map((frame) => clamp(frame.flux / fluxScale));
   const frames: AnalysisFrame[] = [];
   let smoothedRms = 0;
+  // Preserve the original response at 30 fps while measuring decay in seconds.
+  const attack = 1 - Math.pow(1 - 0.42, 30 / fps);
+  const release = 1 - Math.pow(1 - 0.1, 30 / fps);
 
   for (let frameIndex = 0; frameIndex < rawFrames.length; frameIndex += 1) {
     const raw = rawFrames[frameIndex];
     if (!raw) continue;
     const targetRms = clamp(raw.rms / rmsScale);
-    smoothedRms += (targetRms - smoothedRms) * (targetRms > smoothedRms ? 0.42 : 0.1);
+    smoothedRms += (targetRms - smoothedRms) * (targetRms > smoothedRms ? attack : release);
     const spectrum = new Float32Array(spectrumBands);
     for (let band = 0; band < spectrumBands; band += 1) {
       spectrum[band] = clamp(((raw.spectrum[band] ?? 0) / spectrumScale) ** 0.82);

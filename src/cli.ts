@@ -4,6 +4,8 @@ import { parseArgs } from "node:util";
 import { basename, extname, resolve } from "node:path";
 import { analyzeAudio } from "./audio/analyze.js";
 import { loadAnalysis, saveAnalysis } from "./audio/cache.js";
+import { selectClip } from "./audio/clip.js";
+import { readAudioMetadata } from "./audio/metadata.js";
 import { assertFfmpegAvailable, decodeAudio } from "./audio/decode.js";
 import {
   dimensionsFor,
@@ -12,8 +14,11 @@ import {
   parseRatio,
   parseSize,
   renderDimensions,
+  resolveArtworkPath,
 } from "./config.js";
-import { renderVideo } from "./render/render.js";
+import { renderVideo, validateRenderAnalysis } from "./render/render.js";
+import { resolveFadeDurations } from "./render/encoder.js";
+import { prepareArtwork } from "./render/artwork.js";
 import type { ProjectConfig } from "./types.js";
 
 const HELP = `
@@ -22,6 +27,7 @@ visu-visu — deterministic audio-reactive music videos
 Usage:
   bun run render -- <song> [options]
   bun run analyze -- <song> [options]
+  bun run clip -- <song> [options]
 
 Render options:
   -o, --output <file>       Output MP4 (default: <song>.visual.mp4)
@@ -31,16 +37,30 @@ Render options:
       --size <WxH>          Override output size (default: 1920x1080, 16:9)
       --ratio <W:H>         Aspect ratio shorthand, for example 16:9 or 3:2
       --resolution <name>   Long-edge preset: hd, fullhd, or 4k
-      --fps <number>        Override frame rate (12–60, default: 30)
+      --fps <number>        Override frame rate (12–60, default: 60)
       --render-scale <n>    Internal resolution scale (0.25–1, final default: 1)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
+      --image <file>        Local artwork; softened, masked, and used for colors
       --start <seconds>     Start within the song
       --duration <seconds>  Render only this many seconds
       --fade <seconds>      Fade picture/audio at both ends (default: 3)
-      --quality <mode>      final or preview
+      --quality <mode>      final (upload), preview (draft), or master (archive)
   -y, --overwrite           Replace an existing output
+
+Clip options (portrait Full HD60, up to 30 seconds):
+      --drop <seconds>      Use a known drop timestamp instead of auto-selection
+      --lead-in <seconds>   Time before the drop (default: min(5, duration/2))
+      --duration <seconds>  Maximum clip length (default: 30; range: >0–30)
+      --fade-in <seconds>   Brief picture/audio entrance (default: 0.35)
+      --fade-out <seconds>  Picture/audio end fade (default: 3)
+      --dry-run            Print the selection as JSON without encoding
+  -o, --output <file>       Output MP4 (default: <song>.clip.mp4)
+      --title / --artist    Override audio tags; artist is required if untagged
+  Also accepts --config, --analysis, --save-analysis, --resolution, --fps,
+  --render-scale, --seed, --image, --quality, and --overwrite. Aspect ratio is always 9:16.
+  Short sources use their available length. No clear drop: use sustained energy.
 
 Analyze options:
   -o, --output <file>       Analysis JSON (default: <song>.analysis.json)
@@ -51,6 +71,8 @@ Analyze options:
 Examples:
   bun run render -- ./song.wav --title "Night Signal" --artist "Vojta"
   bun run preview -- ./song.mp3 --overwrite
+  bun run clip -- ./song.mp3 --title "Night Signal" --artist "Vojta"
+  bun run clip -- ./song.mp3 --artist "Vojta" --drop 92.5 --dry-run
   bun run analyze -- ./song.flac -o ./song.analysis.json
 `;
 
@@ -64,7 +86,7 @@ const sharedOptions = {
 function numericOption(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`--${name} must be a number`);
+  if (!value.trim() || !Number.isFinite(parsed)) throw new Error(`--${name} must be a number`);
   return parsed;
 }
 
@@ -80,7 +102,7 @@ function defaultOutput(audioPath: string, suffix: string): string {
   return resolve(`${stem}${suffix}`);
 }
 
-function overrideConfig(
+export function overrideConfig(
   config: ProjectConfig,
   options: {
     size?: string;
@@ -91,6 +113,7 @@ function overrideConfig(
     seed?: string;
     title?: string;
     artist?: string;
+    image?: string;
     quality?: string;
     bands?: string;
     fade?: string;
@@ -126,17 +149,25 @@ function overrideConfig(
   if (options.seed !== undefined) mutable.visual.seed = options.seed;
   if (options.title !== undefined) mutable.text.title = options.title;
   if (options.artist !== undefined) mutable.text.artist = options.artist;
+  if (options.image !== undefined) mutable.visual.imagePath = resolveArtworkPath(options.image);
   if (options.quality !== undefined) {
     if (options.quality === "preview") {
-      mutable.output.crf = 20;
+      mutable.output.crf = 22;
       mutable.output.preset = "veryfast";
+      mutable.output.maxBitrateMbps = 8;
       if (renderScale === undefined) mutable.output.renderScale = 0.5;
     } else if (options.quality === "final") {
+      mutable.output.crf = 18;
+      mutable.output.preset = "fast";
+      mutable.output.maxBitrateMbps = 16;
+      if (renderScale === undefined) mutable.output.renderScale = 1;
+    } else if (options.quality === "master") {
       mutable.output.crf = 8;
       mutable.output.preset = "slow";
+      mutable.output.maxBitrateMbps = 0;
       if (renderScale === undefined) mutable.output.renderScale = 1;
     } else {
-      throw new Error('--quality must be either "preview" or "final"');
+      throw new Error('--quality must be "preview", "final", or "master"');
     }
   }
   if (renderScale !== undefined) mutable.output.renderScale = renderScale;
@@ -174,7 +205,7 @@ async function runAnalyze(args: string[]): Promise<void> {
   console.log(`Saved    ${outputPath}`);
 }
 
-async function runRender(args: string[]): Promise<void> {
+async function runRender(args: string[], clip = false): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -182,16 +213,22 @@ async function runRender(args: string[]): Promise<void> {
       ...sharedOptions,
       analysis: { type: "string" },
       "save-analysis": { type: "string" },
+      drop: { type: "string" },
+      "lead-in": { type: "string" },
+      "fade-in": { type: "string" },
+      "fade-out": { type: "string" },
+      "dry-run": { type: "boolean" },
       size: { type: "string" },
       ratio: { type: "string" },
+      start: { type: "string" },
+      fade: { type: "string" },
       resolution: { type: "string" },
       "render-scale": { type: "string" },
       seed: { type: "string" },
       title: { type: "string" },
       artist: { type: "string" },
-      start: { type: "string" },
+      image: { type: "string" },
       duration: { type: "string" },
-      fade: { type: "string" },
       quality: { type: "string" },
       overwrite: { type: "boolean", short: "y" },
     },
@@ -200,8 +237,21 @@ async function runRender(args: string[]): Promise<void> {
     console.log(HELP.trim());
     return;
   }
+  const incompatible = clip
+    ? ["size", "ratio", "start", "fade"] as const
+    : ["drop", "lead-in", "fade-in", "fade-out", "dry-run"] as const;
+  for (const option of incompatible) {
+    if (values[option] !== undefined) {
+      throw new Error(clip
+        ? `--${option} is not a clip option. Clips use 9:16; choose --drop, --lead-in, --fade-in or --fade-out.`
+        : `--${option} is only available with the clip command.`);
+    }
+  }
   const audioPath = inputPath(positionals);
+  const dryRun = clip && (values["dry-run"] ?? false);
+  const log = (message: string): void => { if (!dryRun) console.log(message); };
   const config = overrideConfig(await loadProjectConfig(values.config), {
+    ...(clip ? { ratio: "9:16", resolution: "fullhd", fps: "60", quality: "final" } : {}),
     ...(values.size === undefined ? {} : { size: values.size }),
     ...(values.ratio === undefined ? {} : { ratio: values.ratio }),
     ...(values.resolution === undefined ? {} : { resolution: values.resolution }),
@@ -212,32 +262,94 @@ async function runRender(args: string[]): Promise<void> {
     ...(values.seed === undefined ? {} : { seed: values.seed }),
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
+    ...(values.image === undefined ? {} : { image: values.image }),
     ...(values.fade === undefined ? {} : { fade: values.fade }),
     ...(values.quality === undefined ? {} : { quality: values.quality }),
   });
-  if (!config.text.title) {
-    config.text.title = basename(audioPath, extname(audioPath));
+  const outputPath = resolve(values.output ?? defaultOutput(audioPath, clip ? ".clip.mp4" : ".visual.mp4"));
+  let start = numericOption(values.start, "start") ?? 0;
+  let duration = numericOption(values.duration, "duration");
+  const leadIn = numericOption(values["lead-in"], "lead-in");
+  const drop = numericOption(values.drop, "drop");
+  let fadeInSeconds = numericOption(values["fade-in"], "fade-in") ?? 0.35;
+  let fadeOutSeconds = numericOption(values["fade-out"], "fade-out") ?? 3;
+  if (clip) {
+    duration ??= 30;
+    if (!(duration > 0 && duration <= 30)) throw new Error("--duration must be greater than 0 and at most 30 seconds for clips");
+    if (leadIn !== undefined && !(leadIn >= 0 && leadIn < duration)) {
+      throw new Error("--lead-in must be nonnegative and shorter than --duration");
+    }
+    for (const [label, value] of [["fade-in", fadeInSeconds], ["fade-out", fadeOutSeconds]] as const) {
+      if (value < 0 || value > 30) throw new Error(`--${label} must be between 0 and 30 seconds`);
+    }
   }
-  const outputPath = resolve(values.output ?? defaultOutput(audioPath, ".visual.mp4"));
-  const start = numericOption(values.start, "start") ?? 0;
-  const duration = numericOption(values.duration, "duration");
   await assertFfmpegAvailable();
+  if (clip && (!config.text.title || !config.text.artist)) {
+    const metadata = await readAudioMetadata(audioPath);
+    if (!config.text.title) config.text.title = metadata.title ?? "";
+    if (!config.text.artist) config.text.artist = metadata.artist ?? "";
+  }
+  if (!config.text.title) config.text.title = basename(audioPath, extname(audioPath));
+  if (clip && !config.text.artist) {
+    throw new Error('No artist tag found. Add --artist "Artist Name" (or set text.artist in your config) so the clip includes a readable artist credit.');
+  }
 
   let analysis;
   if (values.analysis) {
-    console.log(`Analysis ${resolve(values.analysis)}`);
+    log(`Analysis ${resolve(values.analysis)}`);
     analysis = await loadAnalysis(values.analysis);
   } else {
-    console.log(`Decode   ${basename(audioPath)}`);
+    log(`Decode   ${basename(audioPath)}`);
     const pcm = await decodeAudio(audioPath);
-    console.log(
+    log(
       `Analyze  ${pcm.duration.toFixed(2)}s · ${config.output.fps} fps · ${config.visual.spectrumBands} bands`,
     );
     analysis = analyzeAudio(pcm, config.output.fps, config.visual.spectrumBands);
     if (values["save-analysis"]) {
       await saveAnalysis(values["save-analysis"], analysis);
-      console.log(`Saved    ${resolve(values["save-analysis"])}`);
+      log(`Saved    ${resolve(values["save-analysis"])}`);
     }
+  }
+
+  if (clip) {
+    const selection = selectClip(analysis, {
+      ...(duration === undefined ? {} : { duration }),
+      ...(leadIn === undefined ? {} : { leadIn }),
+      ...(drop === undefined ? {} : { drop }),
+    });
+    start = selection.start;
+    duration = selection.duration;
+    const renderedDuration = Math.max(1, Math.ceil(duration * config.output.fps - 1e-9)) / config.output.fps;
+    // Keep the selected impact at full volume, including near source boundaries.
+    // Fades are upper limits; a short tail gives the drop a brief hold first.
+    if (selection.dropOffset !== null) {
+      fadeInSeconds = Math.min(fadeInSeconds, selection.dropOffset);
+      const tail = Math.max(0, renderedDuration - selection.dropOffset);
+      const hold = Math.min(0.75, tail * 0.35);
+      fadeOutSeconds = Math.min(fadeOutSeconds, tail - hold);
+    }
+    const fades = resolveFadeDurations(renderedDuration, config.output.fadeSeconds, fadeInSeconds, fadeOutSeconds);
+    fadeInSeconds = fades.fadeIn;
+    fadeOutSeconds = fades.fadeOut;
+    if (dryRun) {
+      await validateRenderAnalysis(audioPath, config, analysis);
+      const renderSize = renderDimensions(config);
+      await prepareArtwork(config.visual.imagePath, renderSize.width, renderSize.height);
+      console.log(JSON.stringify({
+        input: audioPath, output: outputPath,
+        ...selection,
+        width: config.output.width, height: config.output.height, fps: config.output.fps,
+        renderedDuration, fadeInSeconds, fadeOutSeconds,
+        title: config.text.title, artist: config.text.artist,
+        imagePath: config.visual.imagePath ?? "",
+      }, null, 2));
+      return;
+    }
+    log(`Clip     ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s · ${selection.duration.toFixed(2)}s · ${selection.reason}`);
+    log(selection.drop === null
+      ? selection.reason === "short-track" ? "Select   Full available source; shorter than the requested clip" : "Select   Strongest sustained energy; no distinct drop detected"
+      : `Drop     ${selection.drop.toFixed(2)}s in song · ${selection.dropOffset!.toFixed(2)}s into clip`);
+    if (selection.duration < 30) log("Length   Using available audio or the requested shorter duration");
   }
 
   const internalSize = renderDimensions(config);
@@ -245,8 +357,8 @@ async function runRender(args: string[]): Promise<void> {
     internalSize.width === config.output.width && internalSize.height === config.output.height
       ? "native"
       : `${internalSize.width}x${internalSize.height} internal`;
-  console.log(
-    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · prismatic conductor`,
+  log(
+    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · resonance conductor`,
   );
   let lastPercent = -1;
   const result = await renderVideo(
@@ -257,6 +369,7 @@ async function runRender(args: string[]): Promise<void> {
       start,
       ...(duration === undefined ? {} : { duration }),
       overwrite: values.overwrite ?? false,
+      ...(clip ? { fadeInSeconds, fadeOutSeconds } : {}),
     },
     analysis,
     ({ frame, totalFrames, elapsedSeconds }) => {
@@ -269,8 +382,8 @@ async function runRender(args: string[]): Promise<void> {
     },
   );
   process.stdout.write("\n");
-  console.log(`Seed     ${result.seed}`);
-  console.log(`Saved    ${outputPath} (${result.duration.toFixed(2)}s, ${result.frames} frames)`);
+  log(`Seed     ${result.seed}`);
+  log(`Saved    ${outputPath} (${result.duration.toFixed(2)}s, ${result.frames} frames)`);
 }
 
 async function main(): Promise<void> {
@@ -283,15 +396,17 @@ async function main(): Promise<void> {
     await runAnalyze(args);
     return;
   }
-  if (command === "render") {
-    await runRender(args);
+  if (command === "render" || command === "clip") {
+    await runRender(args, command === "clip");
     return;
   }
   throw new Error(`Unknown command "${command}". Run with --help for usage.`);
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`\nError: ${message}`);
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`\nError: ${message}`);
+    process.exitCode = 1;
+  });
+}

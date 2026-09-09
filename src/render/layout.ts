@@ -6,6 +6,9 @@ export interface SafeLayout {
   width: number;
   height: number;
   centerX: number;
+  textLeft: number;
+  textWidth: number;
+  textCenterX: number;
   titleY: number;
   graphTop: number;
   horizon: number;
@@ -22,8 +25,8 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
           top: 0.16,
           bottom: 0.38,
           titleY: 0.18,
-          graphTop: 0.38,
-          horizon: 0.49,
+          graphTop: 0.3,
+          horizon: 0.45,
           graphBottom: 0.6,
         }
       : aspectRatio < 1.2
@@ -33,8 +36,8 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
             top: 0.16,
             bottom: 0.38,
             titleY: 0.18,
-            graphTop: 0.38,
-            horizon: 0.49,
+            graphTop: 0.3,
+            horizon: 0.45,
             graphBottom: 0.6,
           }
         : {
@@ -43,9 +46,9 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
             top: 0.16,
             bottom: 0.2,
             titleY: 0.18,
-            graphTop: 0.4,
+            graphTop: 0.32,
             horizon: 0.56,
-            graphBottom: 0.72,
+            graphBottom: 0.78,
           };
 
   const left = width * profile.left;
@@ -63,6 +66,9 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
     width: safeWidth,
     height: safeHeight,
     centerX: left + safeWidth / 2,
+    textLeft: left,
+    textWidth: width - left * 2,
+    textCenterX: width / 2,
     titleY: height * profile.titleY,
     graphTop: height * profile.graphTop,
     horizon: height * profile.horizon,
@@ -77,4 +83,28 @@ export function safeGraphRadius(layout: SafeLayout): number {
     layout.horizon - layout.graphTop,
     layout.graphBottom - layout.horizon,
   );
+}
+
+/**
+ * Elliptical graph radii with enough inset for the renderer's camera breathing.
+ * Unlike safeGraphRadius(), this lets hero shapes use the available horizontal
+ * space without approaching social-player overlays or the graph clip edge.
+ */
+export function safeGraphRadii(layout: SafeLayout): { x: number; y: number } {
+  const verticalHalf = Math.min(
+    layout.horizon - layout.graphTop,
+    layout.graphBottom - layout.horizon,
+  );
+  const horizontalHalf = Math.min(
+    layout.centerX - layout.left,
+    layout.right - layout.centerX,
+  );
+  const y = verticalHalf * 0.82;
+  return {
+    x: Math.min(
+      horizontalHalf * 0.88,
+      verticalHalf * 4.15,
+    ),
+    y,
+  };
 }

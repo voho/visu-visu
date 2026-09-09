@@ -3,14 +3,14 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadAnalysis, saveAnalysis } from "../src/audio/cache.js";
-import type { AudioAnalysis } from "../src/types.js";
+import { ANALYSIS_VERSION, type AudioAnalysis } from "../src/types.js";
 
 const directory = join(tmpdir(), `visu-visu-cache-test-${process.pid}`);
 const validPath = join(directory, "nested", "valid.analysis.json");
 const invalidPath = join(directory, "invalid.analysis.json");
 
 const analysis: AudioAnalysis = {
-  version: 1,
+  version: ANALYSIS_VERSION,
   sampleRate: 24_000,
   fps: 30,
   duration: 1 / 30,
@@ -54,5 +54,10 @@ describe("analysis cache", () => {
     };
     await writeFile(invalidPath, JSON.stringify(invalid), "utf8");
     expect(loadAnalysis(invalidPath)).rejects.toThrow();
+  });
+
+  test("rejects caches with the old frame-dependent analysis envelope", async () => {
+    await saveAnalysis(invalidPath, { ...analysis, version: ANALYSIS_VERSION - 1 });
+    expect(loadAnalysis(invalidPath)).rejects.toThrow("is not supported");
   });
 });

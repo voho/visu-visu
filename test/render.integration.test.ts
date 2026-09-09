@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { analyzeAudio } from "../src/audio/analyze.js";
@@ -44,6 +44,84 @@ afterAll(async () => {
 });
 
 describe("video render integration", () => {
+  for (const { name, width, height, maxBitrateMbps } of [
+    { name: "landscape", width: 1920, height: 1080, maxBitrateMbps: 16 },
+    { name: "portrait", width: 1080, height: 1920, maxBitrateMbps: 7.5 },
+  ]) {
+    test(`encodes every native Full HD60 ${name} frame into an upload MP4`, async () => {
+      const config = parseProjectConfig({ output: { width, height, maxBitrateMbps, fadeSeconds: 0 } });
+      const frameCount = 61;
+      const duration = frameCount / config.output.fps;
+      const uploadPath = join(directory, `${name}-60fps.mp4`);
+      const encoder = await FfmpegEncoder.create({
+        audioPath,
+        outputPath: uploadPath,
+        config,
+        start: 0.125,
+        duration,
+        frameCount,
+        inputWidth: width,
+        inputHeight: height,
+        overwrite: true,
+      });
+      try {
+        for (let index = 0; index < frameCount; index += 1) {
+          // A distinct luminance per input frame catches duplicated or skipped pictures.
+          const shade = 30 + index * 3;
+          await encoder.write(Buffer.alloc(width * height * 4, Buffer.from([shade, shade, shade, 255])));
+        }
+        await encoder.finish();
+      } catch (error) {
+        encoder.abort();
+        throw error;
+      }
+
+      const probe = spawnSync("ffprobe", [
+        "-v", "error", "-count_frames", "-show_entries",
+        "stream=codec_name,codec_type,profile,pix_fmt,nb_read_frames,duration,width,height,r_frame_rate,avg_frame_rate,sample_rate,channels,color_range,color_space,color_transfer,color_primaries:format=duration,bit_rate",
+        "-of", "json", uploadPath,
+      ], { encoding: "utf8" });
+      if (probe.status !== 0) throw new Error(`Could not probe Full HD60 MP4: ${probe.stderr}`);
+      const parsed = JSON.parse(probe.stdout) as {
+        streams: Array<Record<string, string | number>>;
+        format: { duration: string; bit_rate: string };
+      };
+      const video = parsed.streams.find((stream) => stream.codec_type === "video");
+      const audio = parsed.streams.find((stream) => stream.codec_type === "audio");
+      expect(video).toMatchObject({
+        codec_name: "h264", profile: "High", pix_fmt: "yuv420p", width, height,
+        r_frame_rate: "60/1", avg_frame_rate: "60/1", nb_read_frames: String(frameCount),
+        color_range: "tv", color_space: "bt709", color_transfer: "bt709", color_primaries: "bt709",
+      });
+      expect(audio).toMatchObject({ codec_name: "aac", profile: "LC", sample_rate: "48000", channels: 2 });
+      expect(Number(video?.duration)).toBeCloseTo(duration, 3);
+      // MP4 audio/edit-list durations are rounded to a millisecond timebase.
+      expect(Math.abs(Number(audio?.duration) - duration)).toBeLessThan(0.002);
+      expect(Math.abs(Number(parsed.format.duration) - duration)).toBeLessThan(0.002);
+      expect(Number(parsed.format.bit_rate)).toBeLessThan(maxBitrateMbps * 1_000_000 + DELIVERY_AUDIO_BITRATE);
+
+      const decoded = spawnSync("ffmpeg", [
+        "-v", "error", "-i", uploadPath, "-map", "0:v:0", "-vf", "scale=1:1",
+        "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+      ]);
+      if (decoded.status !== 0) throw new Error(`Could not decode Full HD60 frames: ${decoded.stderr.toString()}`);
+      expect(decoded.stdout.byteLength).toBe(frameCount * 3);
+      for (let index = 0; index < frameCount; index += 1) {
+        const decodedShade = decoded.stdout[index * 3] ?? 0;
+        expect(Math.abs(decodedShade - (30 + index * 3))).toBeLessThanOrEqual(3);
+        if (index > 0) expect(decodedShade).toBeGreaterThan(decoded.stdout[(index - 1) * 3] ?? 0);
+      }
+
+      const mp4 = await readFile(uploadPath);
+      // libx264's embedded settings confirm the configured VBV limit reached the encoder.
+      expect(mp4.toString("latin1")).toContain(`vbv_maxrate=${maxBitrateMbps * 1000}`);
+      expect(mp4.toString("latin1")).toContain(`vbv_bufsize=${maxBitrateMbps * 2000}`);
+      const metadataPosition = mp4.indexOf("moov");
+      expect(metadataPosition).toBeGreaterThan(0);
+      expect(metadataPosition).toBeLessThan(mp4.indexOf("mdat"));
+    }, 30_000);
+  }
+
   test("quantizes duration, fades both ends, and muxes matching A/V output", async () => {
     const config = parseProjectConfig({
       output: { width: 160, height: 160, fps: 12 },
@@ -286,5 +364,18 @@ describe("video render integration", () => {
         analysis,
       ),
     ).rejects.toThrow("Analysis uses 12 fps but the project requests 24 fps");
+  });
+
+  test("rejects bad artwork before opening or overwriting the video output", async () => {
+    const existing = join(directory, "existing-output.mp4");
+    await writeFile(existing, "preserve existing file");
+    const config = parseProjectConfig({
+      output: { width: 160, height: 160, fps: 12 },
+      visual: { spectrumBands: 16, imagePath: join(directory, "missing.png") },
+    });
+    await expect(renderVideo({
+      audioPath, outputPath: existing, config, start: 0, duration: 0.25, overwrite: true,
+    }, analysis)).rejects.toThrow("Could not read artwork");
+    expect(await readFile(existing, "utf8")).toBe("preserve existing file");
   });
 });

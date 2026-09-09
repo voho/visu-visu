@@ -5,10 +5,12 @@ import {
   ANALYSIS_VERSION,
   RENDERER_VERSION,
   type AudioAnalysis,
+  type ProjectConfig,
   type RenderRequest,
 } from "../types.js";
-import { FfmpegEncoder } from "./encoder.js";
+import { FfmpegEncoder, resolveFadeDurations } from "./encoder.js";
 import { VisualizerRenderer } from "./renderer.js";
+import { prepareArtwork } from "./artwork.js";
 
 export interface RenderProgress {
   frame: number;
@@ -24,40 +26,51 @@ export interface RenderResult {
   renderHeight: number;
 }
 
-export async function renderVideo(
-  request: RenderRequest,
+export async function validateRenderAnalysis(
+  audioPath: string,
+  config: ProjectConfig,
   analysis: AudioAnalysis,
-  onProgress?: (progress: RenderProgress) => void,
-): Promise<RenderResult> {
+): Promise<void> {
   if (analysis.version !== ANALYSIS_VERSION) {
     throw new Error(
       `Analysis version ${analysis.version} is not supported by this renderer (expected ${ANALYSIS_VERSION})`,
     );
   }
-  const sourceFileHash = await hashFile(request.audioPath);
+  const sourceFileHash = await hashFile(audioPath);
   if (analysis.sourceFileHash !== sourceFileHash) {
     throw new Error("The analysis was created from a different audio file");
   }
-  if (analysis.spectrumBands !== request.config.visual.spectrumBands) {
+  if (analysis.spectrumBands !== config.visual.spectrumBands) {
     throw new Error(
-      `Analysis has ${analysis.spectrumBands} spectrum bands but the project requests ${request.config.visual.spectrumBands}`,
+      `Analysis has ${analysis.spectrumBands} spectrum bands but the project requests ${config.visual.spectrumBands}`,
     );
   }
-  if (analysis.fps !== request.config.output.fps) {
+  if (analysis.fps !== config.output.fps) {
     throw new Error(
-      `Analysis uses ${analysis.fps} fps but the project requests ${request.config.output.fps} fps`,
+      `Analysis uses ${analysis.fps} fps but the project requests ${config.output.fps} fps`,
     );
   }
-  if (request.start < 0 || request.start >= analysis.duration) {
-    throw new Error(`Start time must be between 0 and ${analysis.duration.toFixed(3)} seconds`);
-  }
+}
 
+export async function renderVideo(
+  request: RenderRequest,
+  analysis: AudioAnalysis,
+  onProgress?: (progress: RenderProgress) => void,
+): Promise<RenderResult> {
+  await validateRenderAnalysis(request.audioPath, request.config, analysis);
+  if (!Number.isFinite(request.start) || request.start < 0 || request.start >= analysis.duration) {
+    throw new Error(`Start time must be a finite number between 0 and ${analysis.duration.toFixed(3)} seconds`);
+  }
+  if (request.duration !== undefined && (!Number.isFinite(request.duration) || request.duration <= 0)) {
+    throw new Error("Render duration must be a finite number greater than zero");
+  }
   const availableDuration = analysis.duration - request.start;
   const requestedDuration = Math.min(request.duration ?? availableDuration, availableDuration);
   if (!(requestedDuration > 0)) throw new Error("Render duration must be greater than zero");
   const fps = request.config.output.fps;
   const totalFrames = Math.max(1, Math.ceil(requestedDuration * fps - 1e-9));
   const duration = totalFrames / fps;
+  resolveFadeDurations(duration, request.config.output.fadeSeconds, request.fadeInSeconds, request.fadeOutSeconds);
   const automaticSeed = sha256(
     [
       analysis.sourceHash,
@@ -70,13 +83,17 @@ export async function renderVideo(
   ).slice(0, 16);
   const seed = request.config.visual.seed === "auto" ? automaticSeed : request.config.visual.seed;
   const renderSize = renderDimensions(request.config);
-  const renderer = new VisualizerRenderer(request.config, seed, renderSize);
+  // Decode before opening the output: a bad image must not truncate an existing MP4.
+  const artwork = await prepareArtwork(request.config.visual.imagePath, renderSize.width, renderSize.height);
+  const renderer = new VisualizerRenderer(request.config, seed, renderSize, artwork);
   const encoder = await FfmpegEncoder.create({
     audioPath: request.audioPath,
     outputPath: request.outputPath,
     config: request.config,
     start: request.start,
     duration,
+    ...(request.fadeInSeconds === undefined ? {} : { fadeInSeconds: request.fadeInSeconds }),
+    ...(request.fadeOutSeconds === undefined ? {} : { fadeOutSeconds: request.fadeOutSeconds }),
     frameCount: totalFrames,
     inputWidth: renderSize.width,
     inputHeight: renderSize.height,

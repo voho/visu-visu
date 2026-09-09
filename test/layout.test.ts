@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createSafeLayout, safeGraphRadius } from "../src/render/layout.js";
+import { createSafeLayout, safeGraphRadii, safeGraphRadius } from "../src/render/layout.js";
 
 function expectOrdered(layout: ReturnType<typeof createSafeLayout>): void {
   expect(layout.left).toBeLessThan(layout.centerX);
@@ -14,6 +14,11 @@ function expectOrdered(layout: ReturnType<typeof createSafeLayout>): void {
   expect(layout.centerX + radius).toBeLessThanOrEqual(layout.right);
   expect(layout.horizon - radius).toBeGreaterThanOrEqual(layout.graphTop);
   expect(layout.horizon + radius).toBeLessThanOrEqual(layout.graphBottom);
+  const radii = safeGraphRadii(layout);
+  expect(layout.centerX - radii.x * 1.05).toBeGreaterThanOrEqual(layout.left);
+  expect(layout.centerX + radii.x * 1.05).toBeLessThanOrEqual(layout.right);
+  expect(layout.horizon - radii.y * 1.05).toBeGreaterThanOrEqual(layout.graphTop);
+  expect(layout.horizon + radii.y * 1.05).toBeLessThanOrEqual(layout.graphBottom);
 }
 
 describe("platform-safe render layout", () => {
@@ -24,8 +29,8 @@ describe("platform-safe render layout", () => {
     expect(layout.bottom).toBeLessThanOrEqual(1080 * 0.8);
     expect(layout.left).toBeGreaterThanOrEqual(1920 * 0.08);
     expect(layout.right).toBeLessThanOrEqual(1920 * 0.92);
-    expect(layout.graphTop).toBe(1080 * 0.4);
-    expect(layout.graphBottom).toBe(1080 * 0.72);
+    expect(layout.graphTop).toBe(1080 * 0.32);
+    expect(layout.graphBottom).toBe(1080 * 0.78);
   });
 
   test("reserves portrait space for captions, controls, and the right action rail", () => {
@@ -36,7 +41,9 @@ describe("platform-safe render layout", () => {
     expect(layout.left).toBeGreaterThanOrEqual(1080 * 0.12);
     expect(layout.right).toBeLessThanOrEqual(1080 * 0.76);
     expect(layout.centerX).toBeLessThan(1080 / 2);
-    expect(layout.graphTop).toBe(1920 * 0.38);
+    expect(layout.textCenterX).toBe(1080 / 2);
+    expect(layout.textLeft * 2 + layout.textWidth).toBe(1080);
+    expect(layout.graphTop).toBe(1920 * 0.3);
     expect(layout.graphBottom).toBe(1920 * 0.6);
   });
 
