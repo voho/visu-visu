@@ -2,6 +2,7 @@
 // geometry as render/resonance.ts. The GPU shades its translucent material skin
 // and the original-style luminous filaments as one coherent object.
 import { previewCamera } from '/lighting-camera.js';
+import { FRAGMENT_COVERAGE_GLSL } from '../render/surface-fragments.js';
 export function createSculpture(gl, hasArtwork = false) {
   const vertexFeatures = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) > 0;
   const vertex = `
@@ -12,6 +13,11 @@ uniform vec4 uMotion;
 uniform vec4 uClock;
 uniform vec4 uDynamics[3];
 uniform vec4 uCamera;
+uniform float uFragmentActive;
+uniform vec4 uFragmentBounds;
+uniform vec4 uFragmentMotion;
+uniform vec3 uFragmentAngles;
+uniform float uFragmentDepth;
 uniform sampler2D uFeatures;
 varying vec3 vPosition;
 varying vec3 vNormal;
@@ -66,20 +72,34 @@ vec3 form(vec2 parameter) {
   return p;
 }
 void main() {
-  vec3 p=form(aParameter);
-  vec3 tangent=form(aParameter+vec2(0.0008,0.0))-p;
-  vec3 bitangent=form(aParameter+vec2(0.0,0.0008))-p;
+  vec2 parameter=uFragmentActive>0.5?uFragmentBounds.xy+aParameter*uFragmentBounds.zw:aParameter;
+  vec3 p=form(parameter);
+  vec3 tangent=form(parameter+vec2(0.0008,0.0))-p;
+  vec3 bitangent=form(parameter+vec2(0.0,0.0008))-p;
   vNormal=normalize(cross(tangent,bitangent));
   vTangent=normalize(tangent);
   vBitangent=normalize(bitangent);
   vPosition=p;
-  vUv=aParameter;
-  vEnergy=feature(0.5-cos(aParameter.x*TAU+uClock.x*0.1)*0.5).x;
+  vUv=parameter;
+  vEnergy=feature(0.5-cos(parameter.x*TAU+uClock.x*0.1)*0.5).x;
   float aspect=uResolution.x/uResolution.y;
   float size=min(uResolution.x,uResolution.y)*(aspect<1.0?0.432:0.338)*uCamera.w;
   float perspective=3.8/(3.8-p.z);
   vec2 projected=mat2(cos(uCamera.z),sin(uCamera.z),-sin(uCamera.z),cos(uCamera.z))*p.xy;
   vec2 pixel=uResolution*uCamera.xy+projected*size*perspective;
+  if(uFragmentActive>0.5) {
+    // Geometry, UVs, normals and light stay at capture time. Only the rigid
+    // curved patch advances, so this is a piece of the sculpture's own skin.
+    vec3 anchor=form(uFragmentBounds.xy),local=p-anchor;
+    local.yz=mat2(cos(uFragmentAngles.x),sin(uFragmentAngles.x),-sin(uFragmentAngles.x),cos(uFragmentAngles.x))*local.yz;
+    local.xz=mat2(cos(uFragmentAngles.y),-sin(uFragmentAngles.y),sin(uFragmentAngles.y),cos(uFragmentAngles.y))*local.xz;
+    local.xy=mat2(cos(uFragmentAngles.z),sin(uFragmentAngles.z),-sin(uFragmentAngles.z),cos(uFragmentAngles.z))*local.xy;
+    vec3 turned=anchor+local;
+    mat2 cameraRotation=mat2(cos(uCamera.z),sin(uCamera.z),-sin(uCamera.z),cos(uCamera.z));
+    turned.z=min(3.2,turned.z+uFragmentDepth*(3.8-anchor.z));
+    vec2 approached=cameraRotation*turned.xy*size*3.8/(3.8-turned.z);
+    pixel=uResolution*uCamera.xy+approached+vec2(uFragmentMotion.x,-uFragmentMotion.y)*size;
+  }
   gl_Position=vec4(pixel/uResolution*2.0-1.0,-p.z*0.35,1.0);
 }
 `;
@@ -105,6 +125,16 @@ uniform float uHasArtwork;
 uniform vec3 uStripState;
 uniform float uPass;
 uniform float uView;
+uniform float uFragmentActive;
+uniform vec4 uFragmentBounds;
+uniform vec4 uFragmentMotion;
+uniform float uFragmentSeed;
+uniform float uFragmentBlur;
+uniform float uFragmentCreditFloor;
+uniform float uFragmentCreditCeiling;
+uniform int uTearCount;
+uniform vec4 uTears[6];
+uniform vec2 uTearStates[6];
 varying vec3 vPosition;
 varying vec3 vNormal;
 varying vec3 vTangent;
@@ -112,6 +142,13 @@ varying vec3 vBitangent;
 varying vec2 vUv;
 varying float vEnergy;
 const float TAU=6.28318530718;
+${FRAGMENT_COVERAGE_GLSL}
+float softenedFragmentCoverage(vec2 uv,vec4 patch,float phase,float blur) {
+ vec2 p=(mod(uv-patch.xy+0.5,1.0)-0.5)/patch.zw;
+ float angle=dot(p,p)>0.00000001?atan(p.y,p.x):0.0;
+ float edge=0.86+sin(angle*3.0+phase)*0.08+sin(angle*5.0-phase)*0.05;
+ return 1.0-smoothstep(edge-0.10-min(0.65,blur*9.0),edge,length(p));
+}
 vec3 lighting(vec3 normal,vec3 albedo,float roughness) {
  const vec3 luma=vec3(0.2126,0.7152,0.0722);
  if(uHasArtwork<0.5) albedo=vec3(dot(albedo,luma));
@@ -175,6 +212,11 @@ void main() {
  float coverage=1.0;
  if(uHasArtwork>0.5) {
   vec4 photo=texture2D(uArtwork,uv);
+  if(uFragmentActive>0.5) {
+   vec2 blur=vec2(uFragmentBlur*0.11);
+   photo=photo*0.5+(texture2D(uArtwork,uv+vec2(blur.x,0.0))+texture2D(uArtwork,uv-vec2(blur.x,0.0))
+    +texture2D(uArtwork,uv+vec2(0.0,blur.y))+texture2D(uArtwork,uv-vec2(0.0,blur.y)))*0.125;
+  }
   coverage=photo.a;
   rawAlbedo=photo.a>0.00001?photo.rgb/photo.a:vec3(0.0);
   albedo=rawAlbedo;
@@ -183,7 +225,7 @@ void main() {
  }
  float roughness=clamp(texture2D(uRoughness,uv).r,0.08,1.0);
  vec3 geometric=normalize(vNormal);
- if(!gl_FrontFacing) geometric=-geometric;
+ if(uFragmentActive>0.5?dot(geometric,vec3(0.0,0.0,3.4)-vPosition)<0.0:!gl_FrontFacing) geometric=-geometric;
  vec3 tangent=normalize(vTangent-geometric*dot(vTangent,geometric));
  vec3 bitangent=normalize(cross(geometric,tangent));
  bitangent*=dot(bitangent,vBitangent)<0.0?-1.0:1.0;
@@ -204,6 +246,18 @@ void main() {
   else color=vec3(roughness);
   if(coverage<0.01)discard;
   gl_FragColor=vec4(color,coverage);return;
+ }
+ if(uFragmentActive>0.5) {
+  coverage*=softenedFragmentCoverage(vUv,uFragmentBounds,uFragmentSeed,uFragmentBlur)*uFragmentMotion.w;
+  if(coverage<0.002)discard;
+  float safeRegion=smoothstep(uFragmentCreditFloor,uFragmentCreditFloor+0.10,gl_FragCoord.y/uResolution.y)
+    *(1.0-smoothstep(uFragmentCreditCeiling-0.06,uFragmentCreditCeiling,gl_FragCoord.y/uResolution.y));
+  gl_FragColor=vec4(color*0.8,coverage*0.90*safeRegion);
+  return;
+ }
+ for(int i=0;i<6;i++) {
+  if(i>=uTearCount)break;
+  coverage*=1.0-surfaceFragmentCoverage(vUv,uTears[i],uTearStates[i].y)*uTearStates[i].x;
  }
  if(uPass<0.5) {
   float facing=abs(dot(normal,normalize(vec3(0.0,0.0,3.4)-vPosition)));
@@ -246,25 +300,57 @@ void main() {
   const parameterBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,parameterBuffer);gl.bufferData(gl.ARRAY_BUFFER,parameters,gl.STATIC_DRAW);
   const surfaceBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,surfaceBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
   const lineBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(lines),gl.STATIC_DRAW);
+  // All pieces share this small curved grid; no per-piece textures or GPU
+  // buffers are allocated when new bursts arrive.
+  const patchParameters=[],patchIndices=[],patchU=12,patchV=8;
+  for(let v=0;v<=patchV;v++)for(let u=0;u<=patchU;u++)patchParameters.push(u/patchU*2-1,v/patchV*2-1);
+  for(let v=0;v<patchV;v++)for(let u=0;u<patchU;u++) {
+    const a=v*(patchU+1)+u,b=a+1,c=a+patchU+1,d=c+1;
+    patchIndices.push(a,b,c,b,d,c);
+  }
+  const patchBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,patchBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(patchParameters),gl.STATIC_DRAW);
+  const patchIndexBuffer=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,patchIndexBuffer);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(patchIndices),gl.STATIC_DRAW);
   const attribute=gl.getAttribLocation(program,'aParameter');
   for(const [name,unit]of[['uAlbedo',0],['uNormal',1],['uRoughness',2],['uArtwork',3],['uFeatures',4],['uStrip',5],['uPalette',7]])gl.uniform1i(uniform(name),unit);
   gl.uniform1f(uniform('uHasArtwork'),hasArtwork?1:0);
   const positions=new Float32Array(9),colors=new Float32Array(9),powers=new Float32Array(6);
-  return (values,width,height,mode)=>{
-    gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,parameterBuffer);gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,2,gl.FLOAT,false,0,0);
+  const tears=new Float32Array(24),tearStates=new Float32Array(12);
+  return (values,width,height,mode,options={})=>{
+    const piece=options.fragment;
+    gl.useProgram(program);gl.bindBuffer(gl.ARRAY_BUFFER,piece?patchBuffer:parameterBuffer);gl.enableVertexAttribArray(attribute);gl.vertexAttribPointer(attribute,2,gl.FLOAT,false,0,0);
     gl.uniform2f(uniform('uResolution'),width,height);
     const camera=previewCamera(values,width,height);
     gl.uniform4f(uniform('uCamera'),camera.x,camera.y,camera.roll,camera.zoom);
+    gl.uniform1f(uniform('uFragmentCreditFloor'),camera.creditFloor);
+    gl.uniform1f(uniform('uFragmentCreditCeiling'),camera.creditCeiling);
     gl.uniform4f(uniform('uMotion'),values[139],values[141],values[143],values[145]);
     gl.uniform4f(uniform('uClock'),values[0],values[1],values[137],values[143]);
     gl.uniform4fv(uniform('uDynamics[0]'),values.subarray(135,147));
     gl.uniform3f(uniform('uAmbient'),values[8],values[9],values[10]);gl.uniform1f(uniform('uExposure'),values[11]);
     gl.uniform3f(uniform('uStripState'),values[132],values[133],values[134]);
     gl.uniform1f(uniform('uView'),mode);gl.uniform1f(uniform('uPass'),0);
+    gl.uniform1f(uniform('uFragmentActive'),piece?1:0);
+    if(piece) {
+      gl.uniform4fv(uniform('uFragmentBounds'),piece.bounds);
+      gl.uniform4fv(uniform('uFragmentMotion'),piece.motion);
+      gl.uniform3fv(uniform('uFragmentAngles'),piece.angles);
+      gl.uniform1f(uniform('uFragmentSeed'),piece.seed);
+      gl.uniform1f(uniform('uFragmentBlur'),piece.blur??0);
+      gl.uniform1f(uniform('uFragmentDepth'),piece.depth??0);
+    }
+    const holes=piece?[]:(options.tears??[]);
+    for(let i=0;i<Math.min(6,holes.length);i++) {
+      tears.set(holes[i].bounds,i*4);tearStates[i*2]=holes[i].strength;tearStates[i*2+1]=holes[i].seed;
+    }
+    gl.uniform1i(uniform('uTearCount'),Math.min(6,holes.length));
+    gl.uniform4fv(uniform('uTears[0]'),tears);gl.uniform2fv(uniform('uTearStates[0]'),tearStates);
     for(let i=0;i<3;i++) {const offset=12+i*8;for(let j=0;j<3;j++){positions[i*3+j]=values[offset+j];colors[i*3+j]=values[offset+3+j];}powers[i*2]=values[offset+6];powers[i*2+1]=values[offset+7];}
     gl.uniform3fv(uniform('uLightPosition[0]'),positions);gl.uniform3fv(uniform('uLightColor[0]'),colors);gl.uniform2fv(uniform('uLightPower[0]'),powers);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,surfaceBuffer);
-    if(mode>0) {
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,piece?patchIndexBuffer:surfaceBuffer);
+    if(piece) {
+      gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disable(gl.CULL_FACE);
+      gl.drawElements(gl.TRIANGLES,patchIndices.length,gl.UNSIGNED_SHORT,0);
+    } else if(mode>0) {
       gl.enable(gl.DEPTH_TEST);gl.depthMask(true);gl.disable(gl.BLEND);gl.disable(gl.CULL_FACE);
       gl.clear(gl.DEPTH_BUFFER_BIT);gl.drawElements(gl.TRIANGLES,indices.length,gl.UNSIGNED_SHORT,0);
     } else {

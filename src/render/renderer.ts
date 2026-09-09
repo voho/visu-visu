@@ -12,7 +12,8 @@ import { lightingAt, shadeSurface, type Rgb } from "./lighting.js";
 import { paletteCss, paletteRgb, randomPalette, type ScenePalette } from "./palette.js";
 import { MaterialLightLayer } from "./material-layer.js";
 import { sampleResonanceMaterial } from "./surface-material.js";
-import { drawMaterialSurface } from "./surface-mesh.js";
+import { drawMaterialSurface, type SurfaceCoverage } from "./surface-mesh.js";
+import { SurfaceFragmentLayer, type FragmentSource } from "./surface-fragment-layer.js";
 import { deriveSceneDynamics, type SceneDynamics } from "./scene-dynamics.js";
 import { SceneAtmosphere } from "./scene-atmosphere.js";
 import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraAt, sceneCameraMatrix } from "./scene-optics.js";
@@ -146,6 +147,7 @@ export class VisualizerRenderer {
   private readonly palette: ScenePalette;
   private readonly layout: SafeLayout;
   private readonly frozenClouds: FrozenCloudLayer;
+  private readonly surfaceFragments: SurfaceFragmentLayer;
   private readonly material: MaterialMap;
   private readonly materialLight: MaterialLightLayer;
   private readonly artworkLight: MaterialLightLayer | undefined;
@@ -178,6 +180,7 @@ export class VisualizerRenderer {
     this.palettePhase = this.palette.anchorHue;
     this.layout = createSafeLayout(this.width, this.height);
     this.frozenClouds = new FrozenCloudLayer(this.width, this.height, this.layout, this.seed);
+    this.surfaceFragments = new SurfaceFragmentLayer(this.layout, this.seed);
     const atmosphereMaterial = recolorMaterial(createMaterial(seed), this.palette);
     this.material = artwork?.objectMaterial ?? atmosphereMaterial;
     this.materialLight = new MaterialLightLayer(this.width, this.height, atmosphereMaterial, this.layout);
@@ -329,6 +332,7 @@ export class VisualizerRenderer {
     );
 
     const novas = novaEventsAt(analysis, time, this.seed, this.config.visual.lowFlash);
+    this.surfaceFragments.update(analysis, time, captureTime => this.captureFragmentSource(analysis, captureTime));
 
     resetContext(this.context, this.width, this.height);
     this.drawCinematicBackground(
@@ -364,14 +368,14 @@ export class VisualizerRenderer {
     drawAudioField(context, this.layout, audioField, this.palette, false, this.config.visual.lowFlash);
     drawMaterialSurface(context, filaments, frame, motion, this.material,
       lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift, this.config.visual.lowFlash, frame.spectrum, this.palette),
-      this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash);
-    this.drawResonance(context, filaments, frame, visual, time, false, "back", motion, effects);
+      this.config.visual.lighting ?? 0.65, this.config.visual.lowFlash, this.surfaceFragments.opacityAt);
+    this.drawResonance(context, filaments, frame, visual, time, false, "back", motion, effects, 1, this.surfaceFragments.opacityAt);
     context.save();
     context.globalAlpha = 0.09;
     this.drawVortexRings(context, rings, visual, choreography, false);
     this.drawRibbonMesh(context, ribbon, visual, choreography, time, "back");
     context.restore();
-    this.drawResonance(context, filaments, frame, visual, time, false, "front", motion, effects);
+    this.drawResonance(context, filaments, frame, visual, time, false, "front", motion, effects, 1, this.surfaceFragments.opacityAt);
     drawAudioField(context, this.layout, audioField, this.palette, true, this.config.visual.lowFlash);
     this.drawFastOrbiters(frame, { ...motion, fastTime: dynamics.spark.clock }, effects);
     context.save();
@@ -388,6 +392,7 @@ export class VisualizerRenderer {
     this.applyGraphCamera(context, dynamics);
     this.drawSupernovas(context, novas, effects, false);
     context.restore();
+    this.surfaceFragments.draw(context);
 
     this.sceneAtmosphere.drawForeground(context, dynamics,
       lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift,
@@ -829,8 +834,8 @@ export class VisualizerRenderer {
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "back", echoMotion, echoEffects, opacity);
       this.drawResonance(context, echo, echoFrame, echoVisual, echoTime, true, "front", echoMotion, echoEffects, opacity);
     }
-    this.drawResonance(context, filaments, frame, visual, time, true, "back", motion, effects);
-    this.drawResonance(context, filaments, frame, visual, time, true, "front", motion, effects);
+    this.drawResonance(context, filaments, frame, visual, time, true, "back", motion, effects, 1, this.surfaceFragments.opacityAt);
+    this.drawResonance(context, filaments, frame, visual, time, true, "front", motion, effects, 1, this.surfaceFragments.opacityAt);
     context.save();
     context.globalAlpha = 0.12;
     this.drawVortexRings(context, rings, visual, choreography, true);
@@ -849,6 +854,21 @@ export class VisualizerRenderer {
     context.transform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
   }
 
+  private captureFragmentSource(analysis: AudioAnalysis, time: number): FragmentSource {
+    const frame = frameAt(analysis, time);
+    const dynamics = deriveSceneDynamics(analysis, time);
+    const motion = inertialMusicMotion(deriveMusicMotion(analysis, time), dynamics);
+    const effects = deriveMusicEffects(motion, this.config.visual.lowFlash, dynamics);
+    const filaments = createResonanceFilaments(this.resonancePlan, frame, deriveVisualState(analysis, time),
+      this.layout, time, this.config.visual.lowFlash, motion,
+      sceneCameraAt(dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction));
+    return { filaments, frame, motion, material: this.material,
+      lights: lightingAt(motion, time, this.seed, this.palettePhase + effects.hueShift,
+        this.config.visual.lowFlash, frame.spectrum, this.palette),
+      strength: this.config.visual.lighting ?? 0.65, lowFlash: this.config.visual.lowFlash,
+      camera: sceneCameraMatrix(this.layout, dynamics, this.palettePhase * 0.01, this.ribbonPlan.direction) };
+  }
+
   private drawResonance(
     context: SKRSContext2D,
     filaments: ResonanceFilament[],
@@ -860,6 +880,7 @@ export class VisualizerRenderer {
     motion: MusicMotion,
     effects: MusicEffects,
     opacity = 1,
+    surfaceOpacity?: SurfaceCoverage,
   ): void {
     const radius = Math.min(
       this.layout.horizon - this.layout.graphTop,
@@ -926,8 +947,9 @@ export class VisualizerRenderer {
           segmentAlpha *= lerp(1, 0.82 + materialSample.height * 0.32, lightingStrength);
         }
         context.strokeStyle = `rgba(${Math.round(baseColor[0] * 255)},${Math.round(baseColor[1] * 255)},${Math.round(baseColor[2] * 255)},${clamp(segmentAlpha)})`;
-        context.globalAlpha = (0.12 + smoothstep(0.18, 0.82, middle.depth) * 0.88) *
+        const runAlpha = (0.12 + smoothstep(0.18, 0.82, middle.depth) * 0.88) *
           (0.5 + middle.energy * 0.7);
+        context.globalAlpha = runAlpha;
         context.beginPath();
         let connected = false;
         for (let index = start; index < end; index += 1) {
@@ -936,6 +958,16 @@ export class VisualizerRenderer {
           const front = (point.depth + next.depth) * 0.5 >= 0.5;
           if (front !== (pass === "front")) {
             connected = false;
+            continue;
+          }
+          const remaining = surfaceOpacity?.((index + 0.5) / (filament.points.length - 1), strand / filaments.length) ?? 1;
+          if (remaining < 0.999) {
+            context.stroke(); context.beginPath(); connected = false;
+            if (remaining > 0.001) {
+              context.globalAlpha = runAlpha * remaining;
+              context.moveTo(point.x, point.y); context.lineTo(next.x, next.y); context.stroke();
+              context.beginPath(); context.globalAlpha = runAlpha;
+            }
             continue;
           }
           if (!connected) context.moveTo(point.x, point.y);
@@ -957,7 +989,7 @@ export class VisualizerRenderer {
         const x = lerp(point.x, next.x, position % 1);
         const y = lerp(point.y, next.y, position % 1);
         context.fillStyle = this.color(hue + offset, 66, 91,
-          (0.28 + point.energy * 0.65) * presence);
+          (0.28 + point.energy * 0.65) * presence * (surfaceOpacity?.(phase, strand / filaments.length) ?? 1));
         context.beginPath();
         context.arc(x, y, Math.max(0.65, radius * 0.005), 0, Math.PI * 2);
         context.fill();

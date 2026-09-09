@@ -5,6 +5,7 @@ import { previewCamera, preparePreviewCamera, setPreviewHero } from '/lighting-c
 import { createSculptureGlow } from '/lighting-glow.js';
 import { createDepthParticles } from '/lighting-particles.js';
 import { createSculptureLensing } from '/lighting-lensing.js';
+import { createSurfaceFragments } from '/lighting-fragments.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -409,6 +410,7 @@ async function start() {
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, stripTexture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, strip);
   }
+  const fragments=createSurfaceFragments(profile,sampleTimeline,uploadSignals,drawSculpture);
   const lensing=profile.hasArtwork?createSculptureLensing(gl,(captureTime,width,height)=>{
     sampleTimeline(captureTime,lensValues);uploadSignals(lensValues);
     drawSculpture(lensValues,width,height,-1);
@@ -455,6 +457,7 @@ async function start() {
         lastSize = size;
       }
       sampleTimeline(time, values);
+      if(mode===0)fragments.update(time);
       history.update(time, width, height, mode === 0);
       lensing?.update(time,width,height);
       // Capturing history temporarily uploads old FFT/material light data.
@@ -487,7 +490,8 @@ async function start() {
       if(mode===0){glow.draw(values,width,height);drawParticles(values,width,height,false);}
       if (mode === 0) { audioField.update(values, width, height); audioField.draw(false); }
       if (mode === 0) history.draw(time, width, height);
-      drawSculpture(values, width, height, mode);
+      drawSculpture(values, width, height, mode,mode===0?{tears:fragments.tears(time)}:{});
+      if(mode===0){fragments.draw(time,width,height);uploadSignals(values);}
       if(mode===0)drawParticles(values,width,height,true);
       if (mode === 0) audioField.draw(true);
       frames++;
@@ -503,7 +507,7 @@ async function start() {
     }
     seek.value = String(time);
     document.querySelector('#elapsed').textContent = clock(time);
-    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time), lensing:lensing?.inspect() });
+    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time), lensing:lensing?.inspect(), fragments:fragments.inspect(time) });
     if (!gl.isContextLost()) requestAnimationFrame(draw);
   }
   play.addEventListener('click', async () => {

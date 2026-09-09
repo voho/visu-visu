@@ -11,21 +11,19 @@ export function setPreviewHero(width,height,creditTop) {
   fitting.clear();
 }
 
-function bounds(values) {
+export function createSculptureSampler(values) {
   const slow=values[0],fast=values[1],bass=values[139],mids=values[141],treble=values[143],pulse=values[145];
   const drift=slow*0.46+0.8,morph=slow*1.8;
   const orb=0.5+Math.sin(morph*0.54+2)*0.5,flower=0.5+Math.sin(morph*0.67+0.8)*0.5,knot=0.5+Math.sin(morph*0.41+1.9)*0.5;
   const ax=0.55+Math.sin(morph*0.34+1.9)*0.78,ay=Math.sin(morph*0.29+0.8)*0.92;
   const az=morph*0.11+Math.sin(morph*0.21+1.9)*0.26+Math.sin(values[136]*0.13)*0.025;
-  const roll=Math.sin(values[136]*0.26)*0.062+Math.sin(values[138]*0.13)*values[137]*0.022;
-  const ca=Math.cos(ax),sa=Math.sin(ax),cb=Math.cos(ay),sb=Math.sin(ay),cc=Math.cos(az+roll),sc=Math.sin(az+roll);
+  const ca=Math.cos(ax),sa=Math.sin(ax),cb=Math.cos(ay),sb=Math.sin(ay),cc=Math.cos(az),sc=Math.sin(az);
   const sample=(start,x)=>{
     const q=Math.max(0,Math.min(31,x*32-0.5)),a=Math.floor(q),t=q-a;
     return values[start+a]*(1-t)+values[start+Math.min(31,a+1)]*t;
   };
-  let left=Infinity,right=-Infinity,bottom=Infinity,top=-Infinity;
-  for(let i=0;i<48;i++)for(let j=0;j<16;j++) {
-    const u=i/48*TAU,phase=j/16*TAU+Math.sin(j/16*TAU*3+0.8)*0.2+Math.sin(j/16*TAU*6+1.6)*0.05;
+  return (parameterU,parameterV)=>{
+    const u=parameterU*TAU,phase=parameterV*TAU;
     const angle=u+slow*0.12+0.8+Math.sin(u*2+drift*0.4)*knot*0.12;
     const band=0.5-Math.cos(u+Math.sin(phase)*0.18+drift*0.22)*0.5;
     const displacement=sample(36,band)*(1-band*0.86);
@@ -43,10 +41,22 @@ function bounds(values) {
     let z=Math.sin(v)*tube+Math.sin(u*2+drift*0.6)*(0.025+knot*0.105+bass*0.075)+Math.sin(u*3-fast*0.68)*pulse*0.085;
     [y,z]=[ca*y-sa*z,sa*y+ca*z];
     [x,z]=[cb*x+sb*z,-sb*x+cb*z];
-    [x,y]=[(cc*x-sc*y)*3.8/(3.8-z),(sc*x+cc*y)*3.8/(3.8-z)];
+    return [cc*x-sc*y,sc*x+cc*y,z];
+  };
+}
+
+function bounds(values) {
+  const sample=createSculptureSampler(values);
+  const roll=Math.sin(values[136]*0.26)*0.062+Math.sin(values[138]*0.13)*values[137]*0.022;
+  const c=Math.cos(roll),s=Math.sin(roll);
+  let left=Infinity,right=-Infinity,bottom=Infinity,top=-Infinity;
+  for(let i=0;i<48;i++)for(let j=0;j<16;j++) {
+    const phase=j/16*TAU;
+    const p=sample(i/48,j/16+(Math.sin(phase*3+0.8)*0.2+Math.sin(phase*6+1.6)*0.05)/TAU);
+    const perspective=3.8/(3.8-p[2]),x=(c*p[0]-s*p[1])*perspective,y=(s*p[0]+c*p[1])*perspective;
     left=Math.min(left,x);right=Math.max(right,x);bottom=Math.min(bottom,y);top=Math.max(top,y);
   }
-  return {clock:slow,left,right,bottom,top,cx:(left+right)/2,cy:(bottom+top)/2};
+  return {clock:values[0],left,right,bottom,top,cx:(left+right)/2,cy:(bottom+top)/2};
 }
 
 export function preparePreviewCamera(timeline,profile) {
@@ -115,6 +125,6 @@ export function previewCamera(values,width,height) {
   return {
     x:0.5-pose.cx*unit*zoom/width+Math.sin(drift*0.29)*values[135]*0.003,
     y:1-(hero.top+hero.bottom)/2-pose.cy*unit*zoom/height+Math.cos(drift*0.23)*values[135]*0.002,
-    roll,zoom,
+    roll,zoom,creditFloor:1-hero.bottom,creditCeiling:1-hero.top,
   };
 }

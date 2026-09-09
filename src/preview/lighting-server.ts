@@ -65,6 +65,7 @@ export interface LightingPreviewProfile {
   hasArtwork: boolean;
   palette: ScenePalette;
   lowFlash?: boolean;
+  seed?: string;
   ghosts?: LightingGhostSchedule;
 }
 
@@ -256,6 +257,8 @@ async function main(): Promise<void> {
     ["/lighting-glow.js", resolve(import.meta.dir, "lighting-glow.js")],
     ["/lighting-particles.js", resolve(import.meta.dir, "lighting-particles.js")],
     ["/lighting-lensing.js", resolve(import.meta.dir, "lighting-lensing.js")],
+    ["/lighting-fragments.js", resolve(import.meta.dir, "lighting-fragments.js")],
+    ["/render/surface-fragments.js", resolve(import.meta.dir, "../render/surface-fragments.js")],
     ["/audio-field-geometry.js", resolve(import.meta.dir, "../render/audio-field-geometry.js")],
     ["/audio", options.audioPath],
     ["/albedo.png", resolve(import.meta.dir, "../../assets/materials/silk-albedo.png")],
@@ -268,7 +271,7 @@ async function main(): Promise<void> {
     title: options.title ?? tags.title ?? basename(options.audioPath, extname(options.audioPath)),
     artist: options.artist ?? tags.artist ?? "", duration: analysis.duration,
     fps: analysis.fps, frameCount: analysis.frames.length, stride: LIGHTING_TIMELINE_STRIDE,
-    palette, hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
+    palette, seed, hasArtwork: Boolean(options.imagePath), lowFlash: options.lowFlash, ghosts: buildLightingGhostSchedule(analysis),
   };
   const server = Bun.serve({ hostname: "127.0.0.1", port: options.port, fetch: createLightingPreviewHandler(profile, timeline, files, assets) });
   console.log(`Live resonance preview: ${server.url}\n${profile.title}${profile.artist ? ` — ${profile.artist}` : ""}\nPress Ctrl+C to stop.`);

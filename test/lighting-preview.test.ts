@@ -14,7 +14,8 @@ import type { AnalysisFrame } from "../src/types.js";
 import { frozenCloudAt, frozenCloudPlan, FROZEN_CLOUD_LIFETIME } from "../src/render/frozen-cloud.js";
 import { prepareArtwork } from "../src/render/artwork.js";
 import { audioFieldAt } from "../src/render/audio-field.js";
-import { previewCamera, preparePreviewCamera, setPreviewHero } from "../src/preview/lighting-camera.js";
+import { previewCamera, preparePreviewCamera, setPreviewHero, createSculptureSampler } from "../src/preview/lighting-camera.js";
+import { createSurfaceFragments, selectVisibleFragments } from "../src/preview/lighting-fragments.js";
 import { deriveSceneDynamics } from "../src/render/scene-dynamics.js";
 import { deriveMusicMotion } from "../src/render/music-motion.js";
 import { lightingAt } from "../src/render/lighting.js";
@@ -279,6 +280,83 @@ describe("live lighting preview", () => {
     const beforeSeek = lensingSamples(29.9);
     lensingSamples(107.967);
     expect(lensingSamples(29.9)).toEqual(beforeSeek);
+  });
+
+  test("detached patches keep actual captured surface coordinates and bounded size", () => {
+    const values = new Float32Array(LIGHTING_TIMELINE_STRIDE);
+    values[0] = 7; values[1] = 14;
+    for (let layer = 0; layer < 6; layer++) {
+      values[135 + layer * 2] = 0.5;
+      values[136 + layer * 2] = 4 + layer;
+    }
+    for (let band = 0; band < 32; band++) values[36 + band] = 0.3;
+    const event = { id: 100, captureTime: 1, strength: 0.9 };
+    const pieces = selectVisibleFragments(values, event, "patch-test");
+    expect(pieces.length).toBeGreaterThan(0);
+    expect(pieces.length).toBeLessThanOrEqual(6);
+    expect(selectVisibleFragments(values, event, "patch-test")).toEqual(pieces);
+    const sample = createSculptureSampler(values);
+    for (const piece of pieces) {
+      expect(piece.anchor).toEqual(sample(piece.u, piece.v));
+      expect(piece.anchor.every(Number.isFinite)).toBe(true);
+      expect(piece.halfU).toBeGreaterThan(0);
+      expect(piece.halfV).toBeGreaterThan(0);
+      const points = Array.from({ length: 24 }, (_, index) => {
+        const angle = index / 24 * Math.PI * 2;
+        const [x, y, z] = sample(piece.u + Math.cos(angle) * piece.halfU, piece.v + Math.sin(angle) * piece.halfV);
+        return [x * 3.8 / (3.8 - z), y * 3.8 / (3.8 - z)];
+      });
+      for (let axis = 0; axis < 2; axis++) {
+        expect(Math.max(...points.map(p => p[axis]!)) - Math.min(...points.map(p => p[axis]!))).toBeLessThan(0.32);
+      }
+    }
+  });
+
+  test("fragment captures freeze music data, heal their gaps, and restore after seeking", () => {
+    const profile = { stride: LIGHTING_TIMELINE_STRIDE, seed: "frozen-patches", ghosts: {
+      events: Array.from({ length: 5 }, (_, index) => ({ id: index, captureTime: index * 3, strength: 0.9 })),
+    } };
+    const source = new Float32Array(profile.stride);
+    for (let band = 0; band < 32; band++) source[36 + band] = 0.25;
+    let capturedSignal: Float32Array | undefined;
+    let drawCount = 0;
+    let drawOrder: string[] = [];
+    const fragments = createSurfaceFragments(profile, (time, out) => {
+      out.set(source); out[0] = time * 0.6; out[1] = time * 1.8;
+      for (let layer = 0; layer < 6; layer++) { out[135 + layer * 2] = 0.5; out[136 + layer * 2] = time * (layer + 1); }
+    }, signal => { capturedSignal = new Float32Array(signal); }, (_signal, _width, _height, _mode, options) => {
+      expect(options.fragment?.bounds).toHaveLength(4);
+      expect(options.fragment?.motion.every(Number.isFinite)).toBe(true);
+      drawOrder.push(options.fragment!.bounds.join(","));
+      drawCount++;
+    });
+    fragments.update(1.2);
+    const first = fragments.inspect(1.2).snapshots[0]!;
+    expect(first.pieces.length).toBeGreaterThan(0);
+    const original = first.sourceHash;
+    source[36] = 0.95;
+    fragments.update(1.3); fragments.draw(1.3, 1920, 1080);
+    expect(fragments.inspect(1.3).snapshots[0]!.sourceHash).toBe(original);
+    expect(capturedSignal![36]).toBeCloseTo(0.25, 6);
+    expect(drawCount).toBeGreaterThan(0);
+    fragments.update(2.8);
+    expect(fragments.tears(2.8)).toHaveLength(0);
+    fragments.update(6.15);
+    expect(fragments.inspect(6.15).cached).toBe(3);
+    expect(fragments.inspect(6.15).snapshots.reduce((sum, event) => sum + event.pieces.length, 0)).toBeLessThanOrEqual(18);
+    expect(fragments.tears(6.15).length).toBeLessThanOrEqual(6);
+    source[36] = 0.25;
+    fragments.update(9.2); fragments.update(1.2);
+    expect(fragments.inspect(1.2).snapshots[0]!.sourceHash).toBe(original);
+    fragments.update(100);
+    expect(fragments.inspect(100).cached).toBe(0);
+    fragments.update(1.2); fragments.update(4.8);
+    drawOrder = []; fragments.draw(4.8, 1920, 1080);
+    const forwardOrder = [...drawOrder], forwardSnapshots = fragments.inspect(4.8).snapshots;
+    fragments.update(7.2); fragments.update(4.8);
+    drawOrder = []; fragments.draw(4.8, 1920, 1080);
+    expect(drawOrder).toEqual(forwardOrder);
+    expect(fragments.inspect(4.8).snapshots).toEqual(forwardSnapshots);
   });
 });
 

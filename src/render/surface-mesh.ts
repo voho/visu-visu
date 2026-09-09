@@ -16,7 +16,24 @@ interface Face {
   strand: number;
   index: number;
   depth: number;
+  u: number;
+  v: number;
+  coverage: number;
 }
+
+/** A shaded piece of the original surface, ready for frozen rigid-body motion. */
+export interface CapturedSurfaceFace {
+  /** Original geometry references; capture callers must not mutate them. */
+  points: [ResonancePoint, ResonancePoint, ResonancePoint, ResonancePoint];
+  /** Display-graded, clamped RGB in 0..1, identical to the live skin formula. */
+  color: Rgb;
+  alpha: number;
+  /** Cell-center coordinates on the original closed surface, before photo UV mirroring. */
+  u: number;
+  v: number;
+}
+
+export type SurfaceCoverage = (u: number, v: number) => number;
 
 /** A translucent material skin on the very same morphing surface as the filaments. */
 export function drawMaterialSurface(
@@ -28,6 +45,42 @@ export function drawMaterialSurface(
   lights: LightingState,
   strength: number,
   lowFlash: boolean,
+  opacityAt?: SurfaceCoverage,
+): void {
+  context.save();
+  context.globalCompositeOperation = "source-over";
+  renderOrCaptureSurface(filaments, frame, motion, material, lights, strength, lowFlash, opacityAt, context);
+  context.restore();
+}
+
+/** Select actual surface polygons before sorting or shading; no screen crop. */
+export function captureMaterialSurface(
+  filaments: ResonanceFilament[],
+  frame: AnalysisFrame,
+  motion: MusicMotion,
+  material: MaterialMap,
+  lights: LightingState,
+  strength: number,
+  lowFlash: boolean,
+  includeFace?: SurfaceCoverage,
+): CapturedSurfaceFace[] {
+  const captured: CapturedSurfaceFace[] = [];
+  renderOrCaptureSurface(filaments, frame, motion, material, lights, strength, lowFlash, includeFace, undefined, captured);
+  return captured;
+}
+
+/** Shared shading keeps captured fragments and the live skin pixel-identical. */
+function renderOrCaptureSurface(
+  filaments: ResonanceFilament[],
+  frame: AnalysisFrame,
+  motion: MusicMotion,
+  material: MaterialMap,
+  lights: LightingState,
+  strength: number,
+  lowFlash: boolean,
+  coverageAt: SurfaceCoverage | undefined,
+  context?: SKRSContext2D,
+  captured?: CapturedSurfaceFace[],
 ): void {
   if (!(strength > 0) || filaments.length < 2) return;
   const count = (filaments[0]?.points.length ?? 1) - 1;
@@ -44,9 +97,14 @@ export function drawMaterialSurface(
     const next = filaments[(strand + rowStep) % filaments.length]!.points;
     for (let index = 0; index < count; index += pointStep) {
       const end = Math.min(count, index + pointStep);
+      const u = (index + end) / (2 * count);
+      const v = wrap((strand + rowStep * 0.5) / filaments.length);
+      const requestedCoverage = coverageAt?.(u, v) ?? 1;
+      const coverage = Number.isFinite(requestedCoverage) ? clamp(requestedCoverage) : 0;
+      if (!(coverage > 0)) continue;
       const a = row[index]!, b = row[end]!, c = next[end]!, d = next[index]!;
       if (!a || !b || !c || !d) continue;
-      faces.push({ points: [a, b, c, d], strand, index,
+      faces.push({ points: [a, b, c, d], strand, index, u, v, coverage,
         depth: (a.surfaceZ + b.surfaceZ + c.surfaceZ + d.surfaceZ) / 4 });
     }
   }
@@ -54,9 +112,6 @@ export function drawMaterialSurface(
   const sample: MaterialSample = { r: 0, g: 0, b: 0, a: 1, nx: 0, ny: 0, nz: 1, roughness: 0.5, height: 0.5 };
   const rgb: Rgb = [0, 0, 0];
   const pulse = motion.bassPulse * (lowFlash ? 0.18 : 1);
-  context.save();
-  context.globalCompositeOperation = "source-over";
-  context.globalAlpha = clamp(strength) * 0.78;
   for (const face of faces) {
     const [a, b, c, d] = face.points;
     const u = face.index / count;
@@ -70,7 +125,7 @@ export function drawMaterialSurface(
     sampleResonanceMaterial(material, filaments, face.strand + (artwork ? rowStep * 0.5 : 0),
       face.index + (artwork ? pointStep * 0.5 : 1), sample);
     if (sample.a <= 0) continue;
-    context.globalAlpha = clamp(strength) * (artwork ? 0.98 : 0.78) * sample.a;
+    const alpha = clamp(strength) * (artwork ? 0.98 : 0.78) * sample.a * face.coverage;
     // The same waveform changes relief and the reflected light ribbon.
     sample.nx += waveSlope * (0.1 + motion.bassEnergy * 0.18);
     sample.ny += Math.sin(v * TAU * 3 - motion.fastTime * 0.32) * spectrum * 0.19;
@@ -92,11 +147,15 @@ export function drawMaterialSurface(
       + (lights.lights[0].color[1] * scopeReflection + lights.lights[1].color[1] * spectrumReflection) * reflectionScale;
     const blue = (artwork ? rgb[2] * photoGain : Math.sqrt(rgb[2]))
       + (lights.lights[0].color[2] * scopeReflection + lights.lights[1].color[2] * spectrumReflection) * reflectionScale;
-    context.fillStyle = `rgb(${Math.round(clamp(r) * 255)},${Math.round(clamp(g) * 255)},${Math.round(clamp(blue) * 255)})`;
-    context.beginPath();
-    context.moveTo(a.x, a.y); context.lineTo(b.x, b.y);
-    context.lineTo(c.x, c.y); context.lineTo(d.x, d.y);
-    context.closePath(); context.fill();
+    if (context) {
+      context.globalAlpha = alpha;
+      context.fillStyle = `rgb(${Math.round(clamp(r) * 255)},${Math.round(clamp(g) * 255)},${Math.round(clamp(blue) * 255)})`;
+      context.beginPath();
+      context.moveTo(a.x, a.y); context.lineTo(b.x, b.y);
+      context.lineTo(c.x, c.y); context.lineTo(d.x, d.y);
+      context.closePath(); context.fill();
+    } else {
+      captured!.push({ points: face.points, color: [clamp(r), clamp(g), clamp(blue)], alpha, u: face.u, v: face.v });
+    }
   }
-  context.restore();
 }
