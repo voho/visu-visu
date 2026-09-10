@@ -16,7 +16,7 @@ function plane(rotate = false): ResonanceFilament[] {
   return Array.from({ length: 5 }, (_, row) => ({
     alpha: 1, hueOffset: 0, depth: 0.5,
     points: [-1, -0.5, 0, 0.5, -1].map((x) => ({
-      x, y: row, depth: 0.5, energy: 0.5,
+      x, y: row, depth: 0.5, energy: 0.5, band: 0.5,
       surfaceX: x,
       surfaceY: rotate ? 0 : 2 - row,
       surfaceZ: rotate ? 2 - row : 0,
@@ -106,7 +106,7 @@ describe("filament material basis", () => {
       spectrum: Float32Array.from({ length: 64 }, (_, index) => 0.6 + 0.3 * Math.sin(index)),
       waveform: Float32Array.from({ length: 192 }, (_, index) => Math.sin(index / 192 * Math.PI * 2)),
     };
-    const visual: VisualState = { ambient: 0.7, drive: 0.8, peak: 0.9, beat: 1, trend: 0.3, motion: 0.8, chapter: 0.4, form: 0.5 };
+    const visual: VisualState = { ambient: 0.7, drive: 0.8, peak: 0.9, beat: 1, trend: 0.3, motion: 0.8, chapter: 0.4, form: 0.5, warmth: 0.5 };
     const sample = (time: number, portrait = false) => createResonanceFilaments(plan, audio, visual,
       createSafeLayout(portrait ? 1080 : 1920, portrait ? 1920 : 1080), time, false);
     const out = sampleMaterial(map, 0, 0);

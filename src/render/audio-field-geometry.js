@@ -10,7 +10,7 @@ const sample = (values, position) => {
 };
 // Monotone cubic interpolation rounds sample corners without overshooting the
 // signed waveform. Extrema remain at the source samples instead of ringing.
-const smoothSample = (values, position) => {
+export const smoothSample = (values, position) => {
   if (values.length < 2) return signed(values[0] ?? 0);
   const at = Math.max(0, Math.min(values.length - 1, position * (values.length - 1)));
   const index = Math.min(values.length - 2, Math.floor(at)), t = at - index;

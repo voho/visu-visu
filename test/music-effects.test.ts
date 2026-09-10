@@ -18,23 +18,25 @@ describe("frequency-weighted visual effects", () => {
     expect(frequencyResponse(0, 0)).toBe(0);
   });
 
-  test("gives bass the strongest zoom and chromatic displacement", () => {
-    const bass = deriveMusicEffects({ ...still, bassEnergy: 1, bassPulse: 1 }, true);
-    const mid = deriveMusicEffects({ ...still, midEnergy: 1 }, true);
-    const treble = deriveMusicEffects({ ...still, trebleEnergy: 1, treblePulse: 1 }, true);
-    expect(bass.zoom - 1).toBeGreaterThan((mid.zoom - 1) * 10);
-    expect(treble.zoom).toBe(1);
-    expect(bass.dispersion).toBeGreaterThan(treble.dispersion * 4);
-    expect(bass.zoom).toBeLessThanOrEqual(1.2);
+  test("anchors the hue travel on the track's warmth and nudges it with bass", () => {
+    const loud = { ...still, bassEnergy: 0.6, midEnergy: 0.6, trebleEnergy: 0.6 };
+    const dark = deriveMusicEffects(loud, true, undefined, 0);
+    const bright = deriveMusicEffects(loud, true, undefined, 1);
+    expect(bright.hueShift - dark.hueShift).toBeGreaterThanOrEqual(100);
+    expect(deriveMusicEffects(loud, true, undefined, 0.5).hueShift).toBeWithin(dark.hueShift, bright.hueShift);
+    const bass = deriveMusicEffects({ ...still, bassEnergy: 1 }, true);
+    const treble = deriveMusicEffects({ ...still, trebleEnergy: 1 }, true);
+    expect(bass.hueShift).toBeGreaterThan(treble.hueShift);
+    expect(deriveMusicEffects(loud, true, undefined, Number.NaN).hueShift).toBe(deriveMusicEffects(loud, true).hueShift);
   });
 
-  test("caps light accents while preserving bass-driven movement", () => {
+  test("caps light accents while preserving the colour travel", () => {
     const motion = { ...still, bassEnergy: 1, bassPulse: 1, attack: 1 };
     const capped = deriveMusicEffects(motion, true);
     const full = deriveMusicEffects(motion, false);
-    expect(capped.zoom).toBe(full.zoom);
-    expect(capped.rotation).toBe(full.rotation);
+    expect(capped.hueShift).toBe(full.hueShift);
     expect(capped.glow).toBeLessThan(full.glow);
     expect(capped.saturation).toBeLessThan(full.saturation);
+    expect(Object.keys(capped).sort()).toEqual(["glow", "hueShift", "saturation"]);
   });
 });

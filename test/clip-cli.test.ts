@@ -45,7 +45,7 @@ describe("clip CLI", () => {
     });
     expect(plan.drop).toBeGreaterThan(8.5);
     expect(plan.drop).toBeLessThan(9.5);
-    expect(plan.dropOffset).toBeCloseTo(5, 2);
+    expect(plan.dropOffset).toBeCloseTo(3, 2);
     expect(plan.end - plan.start).toBe(30);
     expect(await access(outputPath).then(() => true, () => false)).toBe(false);
   });

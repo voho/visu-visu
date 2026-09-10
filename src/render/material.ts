@@ -201,7 +201,9 @@ function blurred(values: Float32Array, width: number, height: number, radius: nu
 export function createMaterialFromRgba(
   pixels: Uint8ClampedArray, width: number, height: number, options: ReliefOptions = {},
 ): MaterialMap {
-  dimensions(width, height);
+  // Cover pigment is sampled bilinearly per face, so a 512 px skin costs the
+  // same per frame as 256 px but its tiles no longer read as macroblocks.
+  dimensions(width, height, 512);
   if (pixels.length !== width * height * 4) throw new Error("RGBA data must match material dimensions");
   const radius = options.blurRadius ?? Math.max(1, Math.round(Math.min(width, height) * 0.016));
   if (!Number.isInteger(radius) || radius < 0 || radius > Math.max(width, height)) {

@@ -1,8 +1,6 @@
-import type { SKRSContext2D } from "@napi-rs/canvas";
-import type { AudioAnalysis } from "../types.js";
-import { audioFieldGeometry, type AudioFieldGeometry, type AudioFieldPoint } from "./audio-field-geometry.js";
-import { paletteCss, type ScenePalette } from "./palette.js";
-import { safeGraphRadius, type SafeLayout } from "./layout.js";
+import { frameAt } from "../audio/analyze.js";
+import type { AnalysisFrame, AudioAnalysis } from "../types.js";
+import { audioFieldGeometry } from "./audio-field-geometry.js";
 import { surfaceFeatureSamples } from "./surface-signal.js";
 
 export const AUDIO_FIELD_BANDS = 32;
@@ -10,7 +8,7 @@ export interface AudioFieldState {
   /** Fast loudness outline and slower amplitude breathing, independently filtered. */
   fast: number;
   slow: number;
-  /** Separate causal frequency envelopes for the visible spectrum crown. */
+  /** Separate causal frequency envelopes for the spectrum readout. */
   spectrum: Float32Array;
 }
 interface Profile { fps: number; count: number; targets: Float64Array; starts: Float64Array; smoothed: Float64Array }
@@ -54,6 +52,48 @@ function build(analysis: AudioAnalysis): Profile {
   return { fps, count, starts, smoothed, targets };
 }
 
+/** Mean of a band range, as analyze.ts derives bass, mid and treble from the spectrum. */
+function rangeMean(spectrum: Float32Array, startRatio: number, endRatio: number): number {
+  const start = Math.floor(startRatio * spectrum.length);
+  const end = Math.max(start + 1, Math.ceil(endRatio * spectrum.length));
+  let sum = 0;
+  for (let index = start; index < end; index += 1) sum += spectrum[index] ?? 0;
+  return sum / (end - start);
+}
+
+/**
+ * The analysis frame at `time` with its spectrum replaced by the strip's
+ * causal band envelopes (32 ms attack, 22 ms inertia, 120-400 ms release)
+ * resampled to the frame's own band count, and bass, mid and treble re-derived
+ * from that spectrum over the analysis' own ranges. The sculpture, its skin,
+ * the core glow and the reflected strip light read this frame: a hit builds
+ * over a few frames and settles with momentum, and FFT noise never crawls
+ * across the mesh. Onset, loudness, centroid and the waveform are the frame's own.
+ */
+export function smoothedFrameAt(analysis: AudioAnalysis, time: number): AnalysisFrame {
+  const frame = frameAt(analysis, time);
+  const bands = frame.spectrum.length;
+  if (bands === 0) return frame;
+  const envelopes = audioFieldAt(analysis, time).spectrum;
+  const spectrum = new Float32Array(bands);
+  for (let band = 0; band < bands; band += 1) {
+    // Bilinear across band centres, clamped at the ends (the same lookup the surface uses).
+    const coordinate = Math.max(0, Math.min(AUDIO_FIELD_BANDS - 1, ((band + 0.5) / bands) * AUDIO_FIELD_BANDS - 0.5));
+    const left = Math.floor(coordinate);
+    const right = Math.min(AUDIO_FIELD_BANDS - 1, left + 1);
+    const a = envelopes[left] ?? 0;
+    const b = envelopes[right] ?? 0;
+    spectrum[band] = a + (b - a) * (coordinate - left);
+  }
+  return {
+    ...frame,
+    spectrum,
+    bass: rangeMean(spectrum, 0, 0.24),
+    mid: rangeMean(spectrum, 0.24, 0.68),
+    treble: rangeMean(spectrum, 0.68, 1),
+  };
+}
+
 /** Absolute-time envelopes: seeking cannot borrow future audio or previous rendered frames. */
 export function audioFieldAt(analysis: AudioAnalysis, time: number): AudioFieldState {
   let profile = profiles.get(analysis);
@@ -71,57 +111,6 @@ export function audioFieldAt(analysis: AudioAnalysis, time: number): AudioFieldS
   };
   for (let band = 0; band < AUDIO_FIELD_BANDS; band++) spectrum[band] = at(band + 2);
   return { fast: at(0), slow: at(1), spectrum };
-}
-
-/** Rounded spectral stems and a smooth signed waveform frame the textured sculpture. */
-export function drawAudioField(
-  context: SKRSContext2D,
-  layout: SafeLayout,
-  field: AudioFieldGeometry,
-  palette: ScenePalette,
-  front: boolean,
-  lowFlash: boolean,
-): void {
-  const radius = safeGraphRadius(layout);
-  const rx = Math.min(layout.width * 0.43, radius * 1.95);
-  const ry = radius * 0.84;
-  const width = Math.max(1.2, radius * 0.0076);
-  context.save();
-  context.globalCompositeOperation = "screen";
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  const path = (points: AudioFieldPoint[]): void => {
-    context.beginPath();
-    let joined = false;
-    for (const point of points) {
-      if (point.front !== front) { joined = false; continue; }
-      const x = layout.centerX + point.x * rx, y = layout.horizon + point.y * ry;
-      if (joined) context.lineTo(x, y); else context.moveTo(x, y);
-      joined = true;
-    }
-    context.stroke();
-  };
-  for (const halo of field.halos) {
-    context.lineWidth = width * halo.width;
-    context.strokeStyle = paletteCss(palette, halo.phase, 88, 76, halo.alpha * (front ? 1 : 0.7));
-    path(halo.points);
-  }
-  for (const spoke of field.spokes) {
-    if (spoke.front !== front) continue;
-    context.lineWidth = width * (0.85 + spoke.energy * 0.7);
-    const alpha = (0.12 + spoke.energy * (lowFlash ? 0.30 : 0.46)) * (front ? 1 : 0.72);
-    context.strokeStyle = paletteCss(palette, spoke.phase, 100, 79, alpha);
-    context.beginPath();
-    context.moveTo(layout.centerX + spoke.x1 * rx, layout.horizon + spoke.y1 * ry);
-    context.lineTo(layout.centerX + spoke.x2 * rx, layout.horizon + spoke.y2 * ry);
-    context.stroke();
-  }
-  if (front) {
-    context.lineWidth = width * 1.2;
-    context.strokeStyle = paletteCss(palette, 65, 80, 84, field.waveAlpha * (lowFlash ? 0.78 : 1));
-    path(field.wave);
-  }
-  context.restore();
 }
 
 export { audioFieldGeometry };

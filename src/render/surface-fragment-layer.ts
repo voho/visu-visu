@@ -12,6 +12,10 @@ import { fragmentCoverage, surfaceFragmentCandidates, surfaceFragmentEventsAt, s
   type SurfaceFragmentCandidate, type SurfaceFragmentEvent, type SurfaceFragmentPose } from "./surface-fragments.js";
 
 type Point3 = { x: number; y: number; z: number };
+/** Fewer, larger pieces per burst: each one reads as a piece of the cover rather than confetti. */
+const MAX_PIECES_PER_BURST = 4;
+/** Every fragment edge is feathered by at least this share of the graph radius (~1.2 px at 1080p). */
+const MIN_EDGE_BLUR = 0.005;
 type Face = { points: Point3[]; color: string; alpha: number };
 export interface FragmentSource {
   filaments: ResonanceFilament[];
@@ -228,7 +232,7 @@ export class SurfaceFragmentLayer {
       .sort((a, b) => b.score - a.score || a.candidate.index - b.candidate.index);
     const selected: Fragment[] = [];
     for (const patch of candidates) {
-      if (selected.length === 6) break;
+      if (selected.length === MAX_PIECES_PER_BURST) break;
       if (selected.some(({ candidate }) => {
         const du = Math.abs(candidate.u - patch.candidate.u), dv = Math.abs(candidate.v - patch.candidate.v);
         return Math.min(du, 1 - du) < candidate.halfU + patch.candidate.halfU
@@ -262,7 +266,7 @@ export class SurfaceFragmentLayer {
         });
         return { ...face, points, depth: points.reduce((sum, point) => sum + point.z, 0) / 4 };
       }).sort((a, b) => a.depth - b.depth);
-      const blur = pose.blur * radius;
+      const blur = Math.max(MIN_EDGE_BLUR, pose.blur) * radius;
       // Fade before a blurred fragment can enter the credit area. No opaque band or hard edge.
       const clearance = smoothstep(this.layout.graphTop + blur * 3,
         this.layout.graphTop + radius * 0.22 + blur * 3, top);
@@ -284,7 +288,7 @@ export class SurfaceFragmentLayer {
         scratch.globalAlpha = face.alpha * 0.28; scratch.stroke();
       }
       context.globalAlpha = clamp(pose.opacity * clearance);
-      context.filter = blur > 0.1 ? `blur(${blur}px)` : "none";
+      context.filter = `blur(${blur}px)`;
       context.drawImage(this.scratch, 0, 0, width * scale, height * scale, left, top, width, height);
     }
     context.restore();

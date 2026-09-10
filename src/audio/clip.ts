@@ -1,9 +1,12 @@
 import type { AudioAnalysis } from "../types.js";
 
+/** Seconds of build-up before the drop: a short clip must reach its drop within three seconds. */
+export const DEFAULT_LEAD_IN = 3;
+
 export interface ClipOptions {
   /** Maximum clip length in seconds, up to 30. */
   duration?: number;
-  /** Build-up before a drop; defaults to 5, or half the length for clips under 10 s. */
+  /** Build-up before a drop; defaults to 3, or half the length for clips under 6 s, so the drop lands within the first three seconds. */
   leadIn?: number;
   /** Optional absolute song time of a known drop. */
   drop?: number;
@@ -55,7 +58,7 @@ function energyProfile(analysis: AudioAnalysis): (start: number, end: number) =>
  */
 export function selectClip(analysis: AudioAnalysis, options: ClipOptions = {}): ClipSelection {
   const duration = options.duration ?? 30;
-  const leadIn = options.leadIn ?? Math.min(5, duration / 2);
+  const leadIn = options.leadIn ?? Math.min(DEFAULT_LEAD_IN, duration / 2);
   if (!Number.isFinite(duration) || duration <= 0 || duration > 30) {
     throw new Error("Clip duration must be greater than 0 and at most 30 seconds.");
   }

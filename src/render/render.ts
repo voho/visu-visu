@@ -52,6 +52,21 @@ export async function validateRenderAnalysis(
   }
 }
 
+/** The automatic seed binds the visual plan to the decoded audio, the output profile and the renderer version. */
+export function resolveRenderSeed(config: ProjectConfig, analysis: AudioAnalysis): string {
+  if (config.visual.seed !== "auto") return config.visual.seed;
+  return sha256(
+    [
+      analysis.sourceHash,
+      config.output.width,
+      config.output.height,
+      config.output.fps,
+      config.visual.spectrumBands,
+      RENDERER_VERSION,
+    ].join(":"),
+  ).slice(0, 16);
+}
+
 export async function renderVideo(
   request: RenderRequest,
   analysis: AudioAnalysis,
@@ -71,17 +86,7 @@ export async function renderVideo(
   const totalFrames = Math.max(1, Math.ceil(requestedDuration * fps - 1e-9));
   const duration = totalFrames / fps;
   resolveFadeDurations(duration, request.config.output.fadeSeconds, request.fadeInSeconds, request.fadeOutSeconds);
-  const automaticSeed = sha256(
-    [
-      analysis.sourceHash,
-      request.config.output.width,
-      request.config.output.height,
-      fps,
-      request.config.visual.spectrumBands,
-      RENDERER_VERSION,
-    ].join(":"),
-  ).slice(0, 16);
-  const seed = request.config.visual.seed === "auto" ? automaticSeed : request.config.visual.seed;
+  const seed = resolveRenderSeed(request.config, analysis);
   const renderSize = renderDimensions(request.config);
   // Decode before opening the output: a bad image must not truncate an existing MP4.
   const artwork = await prepareArtwork(request.config.visual.imagePath, renderSize.width, renderSize.height);

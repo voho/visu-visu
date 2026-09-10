@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createCanvas } from "@napi-rs/canvas";
-import { audioFieldAt, audioFieldGeometry, drawAudioField } from "../src/render/audio-field.js";
-import { createSafeLayout } from "../src/render/layout.js";
-import { randomPalette } from "../src/render/palette.js";
+import { audioFieldAt, audioFieldGeometry, smoothedFrameAt } from "../src/render/audio-field.js";
+import { frameAt } from "../src/audio/analyze.js";
 import { ANALYSIS_VERSION, type AnalysisFrame, type AudioAnalysis } from "../src/types.js";
 
 function source(sample: (time: number) => { rms: number; spectrum?: Float32Array }, fps = 60): AudioAnalysis {
@@ -136,39 +134,45 @@ describe("visible spectrum and amplitude field", () => {
       expect(values[index]! * (index < last / 2 ? 1 : -1)).toBeGreaterThanOrEqual(-1e-12);
     }
   });
+});
 
-  test("renders substantial rounded stems at native landscape and portrait Full HD", () => {
-    const field = { halos: [], wave: [], waveAlpha: 0,
-      spokes: [{ x1: -0.1, y1: 0, x2: 0.1, y2: 0, energy: 1, phase: 0, front: true }] };
-    for (const [width, height] of [[1920, 1080], [1080, 1920]]) {
-      const canvas = createCanvas(width!, height!), context = canvas.getContext("2d");
-      const layout = createSafeLayout(width!, height!);
-      context.lineCap = "butt";
-      context.lineJoin = "miter";
-      drawAudioField(context, layout, field, randomPalette("thick-field"), true, false);
-      const pixels = context.getImageData(Math.floor(layout.centerX), Math.floor(layout.horizon) - 8, 1, 17).data;
-      let coverage = 0;
-      for (let index = 3; index < pixels.length; index += 4) coverage += pixels[index]! / (255 * 0.58);
-      expect(coverage).toBeGreaterThan(2.5);
-      expect(context.lineCap).toBe("butt");
-      expect(context.lineJoin).toBe("miter");
-    }
-  });
-
-  test("keeps a maximum-energy field below credits in both output orientations and restores Canvas state", () => {
-    const field = audioFieldGeometry(new Float32Array(32).fill(1), new Float32Array(32).fill(1), 1, 1, 4);
-    for (const [width, height] of [[640, 360], [360, 640]]) {
-      const canvas = createCanvas(width!, height!), context = canvas.getContext("2d");
-      const layout = createSafeLayout(width!, height!);
-      context.globalAlpha = 0.8;
-      for (const front of [false, true]) drawAudioField(context, layout, field, randomPalette("field"), front, false);
-      expect(context.globalAlpha).toBe(0.8);
-      expect(context.globalCompositeOperation).toBe("source-over");
-      const pixels = context.getImageData(0, 0, width!, height!).data;
-      let lit = 0;
-      for (let i = 3; i < Math.floor(layout.graphTop) * width! * 4; i += 4) expect(pixels[i]).toBe(0);
-      for (let i = 3; i < pixels.length; i += 4) lit += Number(pixels[i]! > 0);
-      expect(lit).toBeGreaterThan(500);
-    }
+describe("smoothedFrameAt", () => {
+  test("keeps the frame's own onset, loudness and waveform but follows the band envelopes", () => {
+    const fps = 60;
+    const bands = 64;
+    const quiet = () => new Float32Array(bands).fill(0.02);
+    const loud = () => new Float32Array(bands).fill(0.9);
+    const frames = Array.from({ length: fps * 2 }, (_, index) => ({
+      rms: index >= fps ? 0.8 : 0.1, peak: 0.5, bass: 0.5, mid: 0.5, treble: 0.5, centroid: 0.5, flux: 0,
+      onset: index === fps ? 1 : 0,
+      spectrum: index >= fps ? loud() : quiet(),
+      waveform: Float32Array.from({ length: 8 }, (_, point) => (index >= fps ? 0.5 : 0.1) * Math.sin(point)),
+    }));
+    const analysis = {
+      version: 2, sampleRate: 24_000, fps, duration: 2, spectrumBands: bands, waveformPoints: 8,
+      sourceHash: "smooth", sourceFileHash: "smooth-file", frames,
+    };
+    const raw = frameAt(analysis, 1);
+    const atStep = smoothedFrameAt(analysis, 1);
+    expect(atStep.spectrum).toHaveLength(bands);
+    expect(atStep.onset).toBe(raw.onset);
+    expect(atStep.rms).toBe(raw.rms);
+    expect(atStep.waveform).toBe(raw.waveform);
+    // The envelopes have not moved yet on the step frame and build over the next frames.
+    expect(atStep.spectrum[10]!).toBeLessThan(0.1);
+    const oneFrame = smoothedFrameAt(analysis, 1 + 1 / fps).spectrum[10]!;
+    const fourFrames = smoothedFrameAt(analysis, 1 + 4 / fps).spectrum[10]!;
+    const settled = smoothedFrameAt(analysis, 1.9).spectrum[10]!;
+    expect(oneFrame).toBeGreaterThan(atStep.spectrum[10]!);
+    expect(fourFrames).toBeGreaterThan(oneFrame);
+    expect(fourFrames).toBeLessThan(0.9);
+    expect(settled).toBeCloseTo(0.9, 2);
+    // Bass, mid and treble follow the smoothed spectrum, not the per-frame FFT.
+    expect(atStep.bass).toBeLessThan(0.1);
+    expect(smoothedFrameAt(analysis, 1.9).bass).toBeCloseTo(0.9, 2);
+    expect(smoothedFrameAt(analysis, 1.9).mid).toBeCloseTo(0.9, 2);
+    expect(smoothedFrameAt(analysis, 1.9).treble).toBeCloseTo(0.9, 2);
+    for (const value of atStep.spectrum) expect(value).toBeGreaterThanOrEqual(0);
+    expect(smoothedFrameAt(analysis, 1.5)).toEqual(smoothedFrameAt(analysis, 1.5));
   });
 });

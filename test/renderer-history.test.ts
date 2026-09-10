@@ -40,24 +40,30 @@ function digest(pixels: Buffer): string {
   return createHash("sha256").update(pixels).digest("hex");
 }
 
+/** A small painted cover with warm, cool and bright regions, written to a temp dir. */
+async function coverFixture(width: number, height: number) {
+  const directory = await mkdtemp(join(tmpdir(), "visu-history-"));
+  const cover = createCanvas(80, 80);
+  const paint = cover.getContext("2d");
+  const gradient = paint.createLinearGradient(0, 0, 80, 80);
+  gradient.addColorStop(0, "#dd7826");
+  gradient.addColorStop(0.45, "#274768");
+  gradient.addColorStop(1, "#40a787");
+  paint.fillStyle = gradient;
+  paint.fillRect(0, 0, 80, 80);
+  paint.fillStyle = "#efc586";
+  paint.fillRect(13, 15, 19, 46);
+  const path = join(directory, "cover.png");
+  await writeFile(path, cover.toBuffer("image/png"));
+  const artwork = await prepareArtwork(path, width, height);
+  return { path, artwork, cleanup: () => rm(directory, { recursive: true, force: true }) };
+}
+
 describe("material sculpture history integration", () => {
   for (const [width, height] of [[320, 180], [180, 320]] as const) {
     test(`reconstructs frozen material, camera, and cover after cache eviction at ${width}×${height}`, async () => {
-      const directory = await mkdtemp(join(tmpdir(), "visu-history-"));
+      const { path, artwork, cleanup } = await coverFixture(width, height);
       try {
-        const cover = createCanvas(80, 80);
-        const paint = cover.getContext("2d");
-        const gradient = paint.createLinearGradient(0, 0, 80, 80);
-        gradient.addColorStop(0, "#dd7826");
-        gradient.addColorStop(0.45, "#274768");
-        gradient.addColorStop(1, "#40a787");
-        paint.fillStyle = gradient;
-        paint.fillRect(0, 0, 80, 80);
-        paint.fillStyle = "#efc586";
-        paint.fillRect(13, 15, 19, 46);
-        const path = join(directory, "cover.png");
-        await writeFile(path, cover.toBuffer("image/png"));
-        const artwork = await prepareArtwork(path, width, height);
         expect(artwork?.material).toBeDefined();
         const config = parseProjectConfig({
           output: { width, height, fps: 30 },
@@ -91,8 +97,32 @@ describe("material sculpture history integration", () => {
         renderer.render(changed, target);
         expect(digest(renderer.render(source, target))).toBe(direct);
       } finally {
-        await rm(directory, { recursive: true, force: true });
+        await cleanup();
       }
     });
   }
+
+  test("cover frames at three times are byte-identical after forward, reverse and direct seeks", async () => {
+    const { path, artwork, cleanup } = await coverFixture(320, 180);
+    try {
+      const config = parseProjectConfig({
+        output: { width: 320, height: 180, fps: 30 },
+        text: { title: "Seek Order", artist: "voho" },
+        visual: { imagePath: path, bokehCount: 8, spectrumBands: 16 },
+      });
+      const source = historyAnalysis();
+      const fresh = (): VisualizerRenderer => new VisualizerRenderer(config, "seek-order", { width: 320, height: 180 }, artwork);
+      // Before the lockup settles, at a frozen-cloud capture, and mid-track with
+      // fragments alive: the three states that carry per-renderer caches.
+      const times = [0.4, 1.05, 4.75];
+      const direct = new Map(times.map((time) => [time, digest(fresh().render(source, time))]));
+      const forward = fresh();
+      for (const time of times) expect(digest(forward.render(source, time))).toBe(direct.get(time)!);
+      const reverse = fresh();
+      for (const time of [...times].reverse()) expect(digest(reverse.render(source, time))).toBe(direct.get(time)!);
+      for (const time of times) expect(digest(forward.render(source, time))).toBe(direct.get(time)!);
+    } finally {
+      await cleanup();
+    }
+  });
 });

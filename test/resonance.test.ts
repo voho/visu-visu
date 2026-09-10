@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createResonanceFilaments, createResonancePlan, type ResonanceFilament } from "../src/render/resonance.js";
 import { createSafeLayout } from "../src/render/layout.js";
-import type { VisualState } from "../src/render/conductor.js";
+import { LOW_FLASH_TRANSIENT_CAP, type VisualState } from "../src/render/conductor.js";
 import type { AnalysisFrame } from "../src/types.js";
 import type { MusicMotion } from "../src/render/music-motion.js";
 
@@ -22,7 +22,7 @@ function frame(overrides: Partial<AnalysisFrame> = {}): AnalysisFrame {
 }
 
 function visual(overrides: Partial<VisualState> = {}): VisualState {
-  return { ambient: 0.5, drive: 0.35, peak: 0.15, beat: 0.2, trend: 0.1, motion: 0.55, chapter: 0.4, form: 0.45, ...overrides };
+  return { ambient: 0.5, drive: 0.35, peak: 0.15, beat: 0.2, trend: 0.1, motion: 0.55, chapter: 0.4, form: 0.45, warmth: 0.5, ...overrides };
 }
 
 function motion(time: number, overrides: Partial<MusicMotion> = {}): MusicMotion {
@@ -171,6 +171,24 @@ describe("harmonic resonance sculpture", () => {
     }
   });
 
+  test("carries the poloidal band position on every point so strands can be tinted bass-warm to treble-cool", () => {
+    const plan = createResonancePlan("band-tint");
+    const layout = createSafeLayout(1920, 1080);
+    const shape = createResonanceFilaments(plan, frame(), visual(), layout, 9.5, true, motion(9.5));
+    for (const strand of shape) {
+      let lowest = 1, highest = 0;
+      for (const point of strand.points) {
+        expect(point.band).toBeWithin(0, 1);
+        lowest = Math.min(lowest, point.band);
+        highest = Math.max(highest, point.band);
+      }
+      // Each strand turns once around the tube: it visits the bass end and the treble end.
+      expect(lowest).toBeLessThan(0.1);
+      expect(highest).toBeGreaterThan(0.9);
+      expect(strand.points[strand.points.length - 1]!.band).toBe(strand.points[0]!.band);
+    }
+  });
+
   test("equal band amplitudes give bass the largest physical deformation", () => {
     const plan = createResonancePlan("shape-dynamics");
     const layout = createSafeLayout(1920, 1080);
@@ -237,11 +255,36 @@ describe("harmonic resonance sculpture", () => {
     const layout = createSafeLayout(1920, 1080);
     const sample = (beat: number, lowFlash: boolean) => createResonanceFilaments(plan, frame(), visual({ beat }), layout, 4, lowFlash);
     const capped = sample(1, true);
-    expect(capped).toEqual(sample(0.3, true));
+    expect(capped).toEqual(sample(LOW_FLASH_TRANSIENT_CAP, true));
     expect(sample(0.2, true)).toEqual(sample(0.2, false));
     const unrestricted = sample(1, false);
     expect(unrestricted[0]?.alpha ?? 0).toBeGreaterThan(capped[0]?.alpha ?? 0);
     expect(largestDisplacement(capped, unrestricted)).toBeWithin(0.01, 1.5);
+  });
+
+  test("sizes the whole object by the camera fit while staying inside the safe rect", () => {
+    const plan = createResonancePlan("section-fit");
+    const camera = { x: 0.01, y: -0.01, roll: 0.02, zoom: 1.1 };
+    for (const [width, height] of [[1920, 1080], [1080, 1920]] as const) {
+      const layout = createSafeLayout(width, height);
+      for (const time of [12, 52, 75]) {
+        const extent = (fit: number) => {
+          const filaments = createResonanceFilaments(plan, frame(), visual(), layout, time, true, motion(time), { ...camera, fit });
+          let largest = 0;
+          for (const strand of filaments) {
+            for (const point of strand.points) {
+              const x = point.x - layout.centerX, y = point.y - layout.horizon;
+              expect(layout.centerX + x * camera.zoom).toBeWithin(layout.left, layout.right);
+              expect(layout.horizon + y * camera.zoom).toBeWithin(layout.graphTop, layout.graphBottom);
+              largest = Math.max(largest, Math.abs(x), Math.abs(y));
+            }
+          }
+          return largest;
+        };
+        const ratio = extent(0.66) / extent(0.96);
+        expect(ratio).toBeWithin(0.66, 0.72);
+      }
+    }
   });
 
   test("accepts empty audio buffers and clamps non-finite or out-of-range analysis values", () => {

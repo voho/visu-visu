@@ -1,12 +1,10 @@
 import { createCanvas } from "@napi-rs/canvas";
 import { describe, expect, test } from "bun:test";
-import { createSafeLayout } from "../src/render/layout.js";
-import { drawAtmosphericBloom, inertialMusicMotion, sceneCameraAt } from "../src/render/scene-optics.js";
+import { createSafeLayout, safeGraphRadii } from "../src/render/layout.js";
+import { drawAtmosphericBloom, inertialMusicMotion, ringReachWithin, sceneCameraAt, sceneCameraMatrix, sculptureFit, type SceneCameraPose } from "../src/render/scene-optics.js";
 import { SCENE_LAYER_NAMES, type SceneDynamics } from "../src/render/scene-dynamics.js";
 import type { MusicMotion } from "../src/render/music-motion.js";
 import { createResonanceFilaments, createResonancePlan } from "../src/render/resonance.js";
-import { audioFieldGeometry } from "../src/render/audio-field-geometry.js";
-import { safeGraphRadius } from "../src/render/layout.js";
 import type { VisualState } from "../src/render/conductor.js";
 
 function dynamics(energy: number, time: number): SceneDynamics {
@@ -22,7 +20,8 @@ describe("inertial scene optics", () => {
     const quiet = dynamics(0, 3);
     const eased = inertialMusicMotion(motion, quiet);
     expect(eased.bassEnergy).toBe(0);
-    expect(eased.bassPulse).toBe(0);
+    // The kick still reaches the camera and lights, as the body momentum the caller supplies.
+    expect(eased.bassPulse).toBe(motion.bassPulse);
     expect(eased.attack).toBe(1);
     expect(eased.treblePulse).toBe(motion.treblePulse);
     const moving = dynamics(0.6, 3);
@@ -32,7 +31,35 @@ describe("inertial scene optics", () => {
     expect(sceneCameraAt(quiet).zoom).toBeLessThan(before.zoom);
   });
 
-  test("keeps the textured sculpture and audio orbits inside the graph even at maximum camera drive", () => {
+  test("keeps the raw envelopes' section contrast instead of the AGC'd scene tiers alone", () => {
+    // The smoothed layers sit at similar levels in an intro and a drop (the
+    // documented 1.1x contrast); the causal band envelopes span 0.2 -> 1.0.
+    const intro = inertialMusicMotion({ ...motion, bassEnergy: 0.2, sustain: 0.2 }, dynamics(0.69, 12));
+    const drop = inertialMusicMotion({ ...motion, bassEnergy: 1, sustain: 1 }, dynamics(0.77, 52));
+    expect(drop.bassEnergy / intro.bassEnergy).toBeGreaterThanOrEqual(2.5);
+    expect(drop.sustain / intro.sustain).toBeGreaterThanOrEqual(2.5);
+    // A decaying impact tail still keeps half its weight between hits.
+    const between = inertialMusicMotion({ ...motion, bassPulse: 0.1 }, { ...dynamics(0.5, 8), impact: { energy: 0.8, clock: 1 } });
+    expect(between.bassPulse).toBe(0.4);
+  });
+
+  test("pushes the camera by the hit momentum, harder at peaks, with identical poses for identical inputs", () => {
+    const state = dynamics(0.4, 21);
+    for (const [section, expected] of [[0, 0.0225], [1, 0.045]] as const) {
+      const rest = sceneCameraAt(state, 1.7, 1, 0, section);
+      const hit = sceneCameraAt(state, 1.7, 1, 1, section);
+      expect(hit.zoom - rest.zoom).toBeCloseTo(expected, 12);
+      expect(hit.x).toBe(rest.x);
+      expect(hit.roll).toBe(rest.roll);
+    }
+    expect(sceneCameraAt(state, 1.7, 1, 0, 1).zoom - sceneCameraAt(state, 1.7, 1, 0, 0).zoom).toBeCloseTo(0.05, 12);
+    expect(sceneCameraAt(state, 1.7, 1, 0.6, 0.3)).toEqual(sceneCameraAt(dynamics(0.4, 21), 1.7, 1, 0.6, 0.3));
+    expect(sculptureFit(0)).toBeCloseTo(0.66, 12);
+    expect(sculptureFit(1)).toBeCloseTo(0.96, 12);
+    expect(sculptureFit(Number.NaN)).toBeCloseTo(0.66, 12);
+  });
+
+  test("keeps the textured sculpture inside the graph even at maximum camera drive", () => {
     const plan = createResonancePlan("optics-bounds");
     const frame = { rms: 1, peak: 1, bass: 1, mid: 1, treble: 1, centroid: 0.5,
       flux: 1, onset: 1, spectrum: new Float32Array(32).fill(1), waveform: new Float32Array(32).fill(0.9) };
@@ -42,16 +69,11 @@ describe("inertial scene optics", () => {
       const halfY = Math.min(layout.horizon - layout.graphTop, layout.graphBottom - layout.horizon);
       for (const time of [0, 7, 21, 56, 103]) {
         const state = dynamics(1, time);
-        const camera = sceneCameraAt(state, 1.7);
+        // Full kick, full section: the largest zoom and the largest fit at once.
+        const camera = { ...sceneCameraAt(state, 1.7, 1, 1, 1), fit: sculptureFit(1) };
         const shape = createResonanceFilaments(plan, frame, visual, layout, time, false,
           { ...motion, slowTime: time * 0.3, fastTime: time * 2 }, camera);
-        const radius = safeGraphRadius(layout);
-        const field = audioFieldGeometry(frame.spectrum, frame.waveform, 1, 1, time);
         const points: Array<{ x: number; y: number }> = shape.flatMap(strand => strand.points);
-        points.push(...field.spokes.flatMap(spoke => [
-          { x: layout.centerX + spoke.x2 * Math.min(layout.width * 0.43, radius * 1.95),
-            y: layout.horizon + spoke.y2 * radius * 0.84 },
-        ]));
         let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
         for (const point of points) {
           const x = point.x - layout.centerX, y = point.y - layout.horizon;
@@ -96,6 +118,83 @@ describe("inertial scene optics", () => {
       expect(outsideHue).toBe(0);
       expect(creditAlpha).toBe(0);
       expect(lit).toBeGreaterThan(14 * 6 * 4);
+    }
+  });
+
+  test("pulses the smear on the hit's flick and keeps a pigment's chroma instead of clipping to white", () => {
+    const layout = createSafeLayout(640, 360);
+    const bloom = (kick: number, color: string, saturation: number) => {
+      const emission = createCanvas(160, 90);
+      const source = emission.getContext("2d");
+      source.fillStyle = color;
+      source.fillRect(layout.centerX / 4 - 7, layout.horizon / 4 - 3, 14, 6);
+      const canvas = createCanvas(160, 90);
+      drawAtmosphericBloom(canvas.getContext("2d"), emission, layout, 640, 360, dynamics(0.4, 14), 0.8, saturation, false, kick);
+      const pixels = canvas.getContext("2d").getImageData(0, 0, 160, 90).data;
+      let alphaSum = 0, chromaSum = 0, lit = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index + 3]! === 0) continue;
+        lit += 1;
+        alphaSum += pixels[index + 3]!;
+        chromaSum += (Math.max(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!)
+          - Math.min(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!)) / 255;
+      }
+      const centre = (Math.round(layout.horizon / 4) * 160 + Math.round(layout.centerX / 4)) * 4;
+      const centreChroma = (Math.max(pixels[centre]!, pixels[centre + 1]!, pixels[centre + 2]!)
+        - Math.min(pixels[centre]!, pixels[centre + 1]!, pixels[centre + 2]!)) / 255;
+      return { alphaSum, meanChroma: chromaSum / lit, centreChroma, centreAlpha: pixels[centre + 3]! };
+    };
+    // The impact layer sits at 0.4; a full flick must add light on top of it.
+    expect(bloom(1, "#00cc00", 1).alphaSum).toBeGreaterThan(bloom(0, "#00cc00", 1).alphaSum);
+    // The cover's peach (chroma 0.45) comes out at least as chromatic, and the
+    // three copies never stack to an opaque (white-clipping) centre.
+    const peach = bloom(0, "#f6a783", 1.3);
+    const sourceChroma = (0xf6 - 0x83) / 255;
+    expect(peach.meanChroma).toBeGreaterThanOrEqual(sourceChroma);
+    expect(peach.centreChroma).toBeGreaterThanOrEqual(sourceChroma);
+    expect(peach.centreAlpha).toBeLessThan(255);
+  });
+
+  test("fits a stroked core ellipse inside the graph clip under every camera pose, tightly", () => {
+    for (const [width, height] of [[1920, 1080], [1080, 1920], [1280, 720]] as const) {
+      const layout = createSafeLayout(width, height);
+      const radii = safeGraphRadii(layout);
+      const halfStroke = 16 * (height / 1080);
+      const poses: SceneCameraPose[] = [];
+      for (const zoom of [1, 1.08, 1.15]) for (const roll of [-0.07, 0, 0.07]) for (const x of [-0.02, 0, 0.02]) for (const y of [-0.035, 0, 0.035]) {
+        poses.push({ x, y, roll, zoom });
+      }
+      // The projected outer edge of the stroke: ellipse points pushed out along
+      // their normal in graph space, then through the shared camera matrix.
+      const outerPoints = (pose: SceneCameraPose, reach: number) => {
+        const m = sceneCameraMatrix(layout, pose);
+        const rx = radii.x * reach, ry = radii.y * reach;
+        const points: Array<{ x: number; y: number }> = [];
+        for (let i = 0; i < 720; i += 1) {
+          const angle = (i / 720) * Math.PI * 2;
+          const px = layout.centerX + Math.cos(angle) * rx, py = layout.horizon + Math.sin(angle) * ry;
+          const normal = Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
+          const nx = Math.cos(angle) / rx / normal, ny = Math.sin(angle) / ry / normal;
+          const gx = px + nx * halfStroke, gy = py + ny * halfStroke;
+          points.push({ x: m.a * gx + m.c * gy + m.e, y: m.b * gx + m.d * gy + m.f });
+        }
+        return points;
+      };
+      const inside = (point: { x: number; y: number }) =>
+        point.x >= layout.left - 1e-6 && point.x <= layout.right + 1e-6
+        && point.y >= layout.graphTop - 1e-6 && point.y <= layout.graphBottom + 1e-6;
+      for (const pose of poses) {
+        const fit = ringReachWithin(layout, pose, radii, halfStroke);
+        expect(fit).toBeGreaterThan(0.6);
+        expect(outerPoints(pose, fit).every(inside)).toBe(true);
+        // Tight: 2% past the fit, some of the stroke leaves the clip.
+        expect(outerPoints(pose, fit * 1.02).every(inside)).toBe(false);
+      }
+      // The zoom and the pan both shrink what fits; the stroke costs its half width.
+      const still = { x: 0, y: 0, roll: 0, zoom: 1 };
+      expect(ringReachWithin(layout, { ...still, zoom: 1.15 }, radii, 0)).toBeLessThan(ringReachWithin(layout, still, radii, 0));
+      expect(ringReachWithin(layout, { ...still, x: 0.03 }, radii, 0)).toBeLessThan(ringReachWithin(layout, still, radii, 0));
+      expect(ringReachWithin(layout, still, radii, 20)).toBeLessThan(ringReachWithin(layout, still, radii, 0));
     }
   });
 });

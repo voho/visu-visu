@@ -1,16 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createDepthGlints,
   createRibbonPlan,
   createSpectralRibbonPoints,
-  createVortexPlan,
-  createVortexRings,
-  depthGlintPose,
   deriveDynamicGrade,
   visualTransient,
 } from "../src/render/reactive-effects.js";
 import { createSafeLayout } from "../src/render/layout.js";
-import type { VisualState } from "../src/render/conductor.js";
+import { LOW_FLASH_TRANSIENT_CAP, type VisualState } from "../src/render/conductor.js";
 import type { AnalysisFrame } from "../src/types.js";
 
 function frame(overrides: Partial<AnalysisFrame> = {}): AnalysisFrame {
@@ -41,6 +37,7 @@ function visual(overrides: Partial<VisualState> = {}): VisualState {
     motion: 0.55,
     chapter: 0.4,
     form: 0.45,
+    warmth: 0.5,
     ...overrides,
   };
 }
@@ -198,7 +195,7 @@ describe("spectral event-horizon ribbon", () => {
     );
     const threshold = createSpectralRibbonPoints(
       frame(),
-      visual({ beat: 0.3 }),
+      visual({ beat: LOW_FLASH_TRANSIENT_CAP }),
       layout,
       2,
       plan,
@@ -219,187 +216,28 @@ describe("spectral event-horizon ribbon", () => {
   });
 });
 
-describe("seeded depth glints", () => {
-  test("covers the spectrum and produces finite direct-seek poses", () => {
-    const layout = createSafeLayout(1920, 1080);
-    const glints = createDepthGlints("glints", 18, 64);
-    expect(glints).toEqual(createDepthGlints("glints", 18, 64));
-    expect(createDepthGlints("other-glints", 18, 64)).not.toEqual(glints);
-    expect(glints).toHaveLength(18);
-    expect(glints[0]?.spectrumIndex).toBe(0);
-    expect(glints.at(-1)?.spectrumIndex).toBe(63);
-
-    for (const glint of glints) {
-      expectFiniteRecord(glint);
-      expect(glint.depthOffset).toBeWithin(0, 1);
-      expect(glint.spectrumIndex).toBeGreaterThanOrEqual(0);
-      expect(glint.spectrumIndex).toBeLessThanOrEqual(63);
-      const pose = depthGlintPose(
-        glint,
-        frame(),
-        visual(),
-        8,
-        1920,
-        1080,
-        layout,
-        true,
-        1,
-      );
-      expectFiniteRecord(pose);
-      expect(pose.depth).toBeGreaterThanOrEqual(0);
-      expect(pose.depth).toBeLessThanOrEqual(1);
-      expect(pose.alpha).toBeWithin(0, 0.62);
-      expect(pose.trail).toBeGreaterThanOrEqual(0);
-      expect(pose.trail).toBeLessThanOrEqual(1);
-      expect(pose.energy).toBeGreaterThanOrEqual(0);
-      expect(pose.energy).toBeLessThanOrEqual(1);
-      expect(pose.hue).toBeGreaterThanOrEqual(0);
-      expect(pose.hue).toBeLessThan(360);
-      expect(pose.size).toBeGreaterThan(0);
-      expect(
-        depthGlintPose(glint, frame(), visual(), 8, 1920, 1080, layout, true, 1),
-      ).toEqual(pose);
-    }
-  });
-
-  test("moves analytically through depth and honors the low-flash cap", () => {
-    const layout = createSafeLayout(1920, 1080);
-    const glint = createDepthGlints("glint-motion", 1, 64)[0];
-    expect(glint).toBeDefined();
-    if (!glint) return;
-    const time = (0.55 - glint.depthOffset) / glint.travelSpeed;
-    const capped = depthGlintPose(
-      glint,
-      frame({ treble: 1, spectrum: Float32Array.from({ length: 64 }, () => 1) }),
-      visual({ beat: 1, drive: 0.7, peak: 0.4 }),
-      time,
-      1920,
-      1080,
-      layout,
-      true,
-      1,
-    );
-    const threshold = depthGlintPose(
-      glint,
-      frame({ treble: 1, spectrum: Float32Array.from({ length: 64 }, () => 1) }),
-      visual({ beat: 0.3, drive: 0.7, peak: 0.4 }),
-      time,
-      1920,
-      1080,
-      layout,
-      true,
-      1,
-    );
-    const unrestricted = depthGlintPose(
-      glint,
-      frame({ treble: 1, spectrum: Float32Array.from({ length: 64 }, () => 1) }),
-      visual({ beat: 1, drive: 0.7, peak: 0.4 }),
-      time,
-      1920,
-      1080,
-      layout,
-      false,
-      1,
-    );
-    const later = depthGlintPose(
-      glint,
-      frame(),
-      visual(),
-      time + 1,
-      1920,
-      1080,
-      layout,
-      true,
-      1,
-    );
-
-    expect(capped).toEqual(threshold);
-    expect(unrestricted.alpha).toBeGreaterThan(capped.alpha);
-    expect(unrestricted.size).toBeGreaterThan(capped.size);
-    expect(Math.hypot(later.x - capped.x, later.y - capped.y)).toBeGreaterThan(0);
-  });
-});
-
-describe("vortex ring plan", () => {
-  test("creates deterministic, bounded rings in far-to-near painter order", () => {
-    const layout = createSafeLayout(1080, 1920);
-    const plan = createVortexPlan("vortex", 9);
-    const rings = createVortexRings(plan, frame(), visual(), layout, 5, true);
-
-    expect(plan).toEqual(createVortexPlan("vortex", 9));
-    expect(createVortexPlan("other-vortex", 9)).not.toEqual(plan);
-    expect(rings).toEqual(createVortexRings(plan, frame(), visual(), layout, 5, true));
-    expect(rings).toHaveLength(9);
-
-    for (let index = 0; index < rings.length; index += 1) {
-      const ring = rings[index];
-      expect(ring).toBeDefined();
-      if (!ring) continue;
-      expectFiniteRecord(ring);
-      expect(ring.depth).toBeGreaterThanOrEqual(0);
-      expect(ring.depth).toBeLessThanOrEqual(1);
-      expect(ring.visibility).toBeGreaterThanOrEqual(0);
-      expect(ring.visibility).toBeLessThanOrEqual(1);
-      expect(ring.alpha).toBeWithin(0, 0.22);
-      expect(ring.lineWidth).toBeGreaterThan(0);
-      expect(ring.hue).toBeGreaterThanOrEqual(0);
-      expect(ring.hue).toBeLessThan(360);
-      expect(ring.x - ring.radiusX).toBeGreaterThanOrEqual(layout.left);
-      expect(ring.x + ring.radiusX).toBeLessThanOrEqual(layout.right);
-      expect(ring.y - ring.radiusY).toBeGreaterThanOrEqual(layout.graphTop);
-      expect(ring.y + ring.radiusY).toBeLessThanOrEqual(layout.graphBottom);
-      if (index > 0) expect(ring.depth).toBeGreaterThanOrEqual(rings[index - 1]?.depth ?? 0);
-    }
-  });
-
-  test("caps beat-driven ring scale and light in low-flash mode", () => {
-    const layout = createSafeLayout(1920, 1080);
-    const plan = createVortexPlan("vortex-low-flash", 8);
-    const capped = createVortexRings(plan, frame(), visual({ beat: 1 }), layout, 4, true);
-    const threshold = createVortexRings(plan, frame(), visual({ beat: 0.3 }), layout, 4, true);
-    const unrestricted = createVortexRings(plan, frame(), visual({ beat: 1 }), layout, 4, false);
-
-    expect(capped).toEqual(threshold);
-    expect(unrestricted.some((ring, index) => ring.alpha > (capped[index]?.alpha ?? 0))).toBe(true);
-    expect(
-      unrestricted.some((ring, index) => ring.radiusX > (capped[index]?.radiusX ?? 0)),
-    ).toBe(true);
-  });
-});
-
 describe("dynamic color grade", () => {
   test("stays bounded and grows from quiet ambience into a peak", () => {
-    const quiet = deriveDynamicGrade(
-      frame({ rms: 0.05, treble: 0.05, centroid: 0.2 }),
-      visual({ ambient: 1, drive: 0, peak: 0, beat: 0 }),
-      2,
-      true,
-    );
-    const peak = deriveDynamicGrade(
-      frame({ rms: 1, treble: 1, centroid: 0.8 }),
-      visual({ ambient: 0, drive: 0.4, peak: 0.6, beat: 1 }),
-      2,
-      true,
-    );
+    const quiet = deriveDynamicGrade(visual({ ambient: 1, drive: 0, peak: 0, beat: 0 }), true);
+    const peak = deriveDynamicGrade(visual({ ambient: 0, drive: 0.4, peak: 0.6, beat: 1 }), true);
 
-    expect(peak.washAlpha).toBeGreaterThan(quiet.washAlpha);
     expect(peak.bloom).toBeGreaterThan(quiet.bloom);
     expect(peak.vignetteScale).toBeLessThan(quiet.vignetteScale);
     for (const value of Object.values(peak)) expect(Number.isFinite(value)).toBe(true);
-    expect(peak.hueShift).toBeWithin(-48, 48);
-    expect(peak.washAlpha).toBeWithin(0, 0.04);
     expect(peak.bloom).toBeWithin(0, 0.17);
+    expect(peak.vignetteScale).toBeWithin(0.82, 1.08);
   });
 
   test("caps beat-driven bloom when low-flash mode is enabled", () => {
     const beat = visual({ ambient: 0, drive: 1, peak: 0, beat: 1 });
-    const thresholdBeat = visual({ ambient: 0, drive: 1, peak: 0, beat: 0.3 });
-    const restrained = deriveDynamicGrade(frame(), beat, 4, true);
-    const unrestricted = deriveDynamicGrade(frame(), beat, 4, false);
+    const thresholdBeat = visual({ ambient: 0, drive: 1, peak: 0, beat: LOW_FLASH_TRANSIENT_CAP });
+    const restrained = deriveDynamicGrade(beat, true);
+    const unrestricted = deriveDynamicGrade(beat, false);
 
-    expect(visualTransient(1, true)).toBe(visualTransient(0.3, true));
-    expect(deriveDynamicGrade(frame(), thresholdBeat, 4, true).bloom).toBe(restrained.bloom);
+    expect(visualTransient(1, true)).toBe(visualTransient(LOW_FLASH_TRANSIENT_CAP, true));
+    expect(visualTransient(1, true)).toBe(LOW_FLASH_TRANSIENT_CAP);
+    expect(deriveDynamicGrade(thresholdBeat, true).bloom).toBe(restrained.bloom);
     expect(unrestricted.bloom).toBeGreaterThan(restrained.bloom);
-    expect(deriveDynamicGrade(frame(), beat, 4, true)).toEqual(restrained);
+    expect(deriveDynamicGrade(beat, true)).toEqual(restrained);
   });
 });

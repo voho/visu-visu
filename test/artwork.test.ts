@@ -3,8 +3,8 @@ import { createCanvas } from "@napi-rs/canvas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { drawArtwork, prepareArtwork, deriveArtworkMotion } from "../src/render/artwork.js";
-import type { MusicMotion } from "../src/render/music-motion.js";
+import { createSafeLayout } from "../src/render/layout.js";
+import { coverCameraAt, drawArtwork, prepareArtwork, deriveArtworkMotion } from "../src/render/artwork.js";
 import { sampleMaterial } from "../src/render/material.js";
 
 let directory: string;
@@ -41,7 +41,7 @@ describe("artwork preparation", () => {
     expect(prepared!.accentHue).toBeLessThanOrEqual(30);
     expect(prepared!.secondaryHue).toBeGreaterThanOrEqual(195);
     expect(prepared!.secondaryHue).toBeLessThanOrEqual(225);
-    expect(Math.max(prepared!.canvas.width, prepared!.canvas.height)).toBeLessThanOrEqual(512);
+    expect(Math.max(prepared!.canvas.width, prepared!.canvas.height)).toBeLessThanOrEqual(768);
     await rm(path);
     const output = createCanvas(1920, 1080);
     const outputContext = output.getContext("2d");
@@ -81,17 +81,18 @@ describe("artwork preparation", () => {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
       };
       const peripheralLuminance = pixel(0.08, 0.85);
-      expect(peripheralLuminance).toBeGreaterThan(20);
-      expect(peripheralLuminance).toBeLessThan(80);
+      expect(peripheralLuminance).toBeGreaterThan(30);
+      expect(peripheralLuminance).toBeLessThan(150);
       // The original cover must flow through the credits without a full-width
-      // dark stripe. Its overall grade stays subdued for light text shadows.
-      expect(pixel(0.5, 0.23)).toBeGreaterThan(peripheralLuminance * 0.55);
-      expect(pixel(0.5, 0.23)).toBeLessThan(95);
+      // dark stripe; the shade under the lockup only softens it for the letters.
+      expect(pixel(0.5, 0.23)).toBeGreaterThan(peripheralLuminance * 0.45);
+      expect(pixel(0.5, 0.23)).toBeLessThan(150);
+      // The hero hole keeps the sculpture's ground darker than the periphery.
       expect(pixel(0.5, heroY)).toBeGreaterThan(8);
-      expect(pixel(0.5, heroY)).toBeLessThan(45);
-      // Fine source stripes are blurred into soft color rather than retaining
-      // alternating high-contrast lines around the visualization.
-      expect(Math.abs(pixel(0.08, 0.85) - pixel(0.08 + 2 / width, 0.85))).toBeLessThan(3);
+      expect(pixel(0.5, heroY)).toBeLessThan(peripheralLuminance * 0.85);
+      // Fine source stripes (183 levels of contrast) are softened to a fraction
+      // of that rather than retaining alternating high-contrast lines.
+      expect(Math.abs(pixel(0.08, 0.85) - pixel(0.08 + 2 / width, 0.85))).toBeLessThan(24);
     });
   }
 
@@ -152,6 +153,22 @@ describe("artwork preparation", () => {
     expect(Math.max(...object.roughness)).toBeLessThanOrEqual(0.74);
   });
 
+  test("samples the object pigment at up to 512 px on the long edge", async () => {
+    const source = createCanvas(700, 400);
+    const context = source.getContext("2d");
+    context.fillStyle = "#3c87b9";
+    context.fillRect(0, 0, 700, 400);
+    context.fillStyle = "#f05331";
+    context.fillRect(100, 60, 300, 200);
+    const path = join(directory, "object-large.png");
+    await writeFile(path, source.toBuffer("image/png"));
+    const object = (await prepareArtwork(path, 640, 360))!.objectMaterial!;
+    expect(object.width).toBe(512);
+    expect(object.height).toBe(293);
+    expect(sampleMaterial(object, 0.35, 0.4).r).toBeGreaterThan(0.9);
+    expect(sampleMaterial(object, 0.9, 0.9).b).toBeGreaterThan(0.7);
+  });
+
   test("adds a feathered artwork vignette independently of the scene", async () => {
     const source = createCanvas(640, 360);
     const context = source.getContext("2d");
@@ -166,6 +183,88 @@ describe("artwork preparation", () => {
     ).data[3]!;
     expect(alpha(0.05, 0.95)).toBeLessThan(alpha(0.16, 0.91) * 0.85);
     expect(alpha(0.16, 0.91)).toBeGreaterThan(70);
+    // The credit lockup sits on a baked shade; a flat image has no focal points.
+    const layout = createSafeLayout(640, 360);
+    const lockupY = (layout.titleY + 0.55 * (layout.graphTop - layout.titleY)) / 360;
+    expect(alpha(0.5, lockupY)).toBeLessThanOrEqual(alpha(0.5, 0.85) * 0.65);
+    expect(artwork.focal).toEqual({ a: [0.5, 0.5], b: [0.5, 0.5] });
+  });
+
+  test("finds the brightest and the most chromatic regions as focal points", async () => {
+    const source = createCanvas(640, 360);
+    const context = source.getContext("2d");
+    // A mid-grey field: the white patch is the only bright region and the
+    // orange patch (slightly darker than the field) the only chromatic one.
+    context.fillStyle = "#808080";
+    context.fillRect(0, 0, 640, 360);
+    context.fillStyle = "#f8f8f8";
+    context.fillRect(64, 36, 96, 72);
+    context.fillStyle = "#e0602a";
+    context.fillRect(448, 216, 96, 96);
+    const path = join(directory, "focal.png");
+    await writeFile(path, source.toBuffer("image/png"));
+    const artwork = (await prepareArtwork(path, 640, 360))!;
+    expect(artwork.focal!.a[0]).toBeCloseTo(112 / 640, 1);
+    expect(artwork.focal!.a[1]).toBeCloseTo(72 / 360, 1);
+    expect(artwork.focal!.b[0]).toBeCloseTo(496 / 640, 1);
+    expect(artwork.focal!.b[1]).toBeCloseTo(264 / 360, 1);
+  });
+
+  test("samples the cover's bright saturated pixels as spaced ember colours, none from a grey cover", async () => {
+    const source = createCanvas(640, 360);
+    const context = source.getContext("2d");
+    context.fillStyle = "#606060";
+    context.fillRect(0, 0, 640, 360);
+    // One bright orange spark, one bright teal patch and a dark red patch too dim to be light.
+    context.fillStyle = "#ff8c40";
+    context.fillRect(100, 100, 40, 40);
+    context.fillStyle = "#40c8c0";
+    context.fillRect(500, 240, 40, 40);
+    context.fillStyle = "#300808";
+    context.fillRect(300, 60, 40, 40);
+    const path = join(directory, "embers.png");
+    await writeFile(path, source.toBuffer("image/png"));
+    const artwork = (await prepareArtwork(path, 640, 360))!;
+    const colors = artwork.emberColors!;
+    expect(colors.length).toBeGreaterThanOrEqual(4);
+    expect(colors.length).toBeLessThanOrEqual(32);
+    const hue = ([r, g, b]: readonly number[]): "orange" | "teal" | "other" =>
+      r! > g! && g! > b! && r! - b! > 0.4 ? "orange" : g! > r! && b! > r! && g! - r! > 0.3 ? "teal" : "other";
+    expect(colors.filter((rgb) => hue(rgb) === "orange").length).toBeGreaterThan(0);
+    expect(colors.filter((rgb) => hue(rgb) === "teal").length).toBeGreaterThan(0);
+    expect(colors.filter((rgb) => hue(rgb) === "other")).toEqual([]);
+    // Spaced picks: a 40 px patch on a 640 px cover is 12 px on the 192 px crop, so at most a few picks per patch.
+    expect(colors.filter((rgb) => hue(rgb) === "orange").length).toBeLessThanOrEqual(9);
+    expect((await prepareArtwork(path, 640, 360))!.emberColors).toEqual(colors);
+
+    const grey = createCanvas(64, 64);
+    grey.getContext("2d").fillStyle = "#a0a0a0";
+    grey.getContext("2d").fillRect(0, 0, 64, 64);
+    const greyPath = join(directory, "grey-embers.png");
+    await writeFile(greyPath, grey.toBuffer("image/png"));
+    expect((await prepareArtwork(greyPath, 320, 180))!.emberColors).toEqual([]);
+  });
+
+  test("keeps the Ken Burns offset inside the zoom margin and moves with the section", () => {
+    const focal = { a: [0.1, 0.9] as const, b: [0.95, 0.05] as const };
+    for (const section of [0, 0.5, 1]) {
+      for (const kick of [0, 1]) {
+        for (const time of [0, 12, 75, 1000]) {
+          const camera = coverCameraAt(time, section, kick, focal, 0.7, 1920, 1080, 40, -30);
+          expect(Math.abs(camera.offsetX)).toBeLessThanOrEqual((camera.zoom - 1) * 960 + 1e-9);
+          expect(Math.abs(camera.offsetY)).toBeLessThanOrEqual((camera.zoom - 1) * 540 + 1e-9);
+          expect(camera.zoom).toBeGreaterThan(1);
+        }
+      }
+    }
+    const quiet = coverCameraAt(12, 0, 0, focal, 0.7, 1920, 1080);
+    const loud = coverCameraAt(12, 1, 0, focal, 0.7, 1920, 1080);
+    expect(loud.zoom).toBeGreaterThan(quiet.zoom);
+    expect(loud.offsetX).not.toBe(quiet.offsetX);
+    expect(coverCameraAt(12, 0, 0, focal, 0.7, 1920, 1080)).toEqual(quiet);
+    // The kick alone adds 3% zoom, moving the texture corner by 28.8 px (1.5% of W); require at least 0.5%.
+    const kicked = coverCameraAt(12, 0, 1, focal, 0.7, 1920, 1080);
+    expect((kicked.zoom - quiet.zoom) * 960).toBeGreaterThanOrEqual(1920 * 0.005);
   });
 
   test("gently zooms on bass impulses without flashing or accumulating state", async () => {
@@ -182,11 +281,7 @@ describe("artwork preparation", () => {
     const artwork = (await prepareArtwork(path, 360, 640))!;
     const output = createCanvas(360, 640);
     const context = output.getContext("2d");
-    const music: MusicMotion = {
-      slowTime: 10, fastTime: 20, bassPulse: 0, treblePulse: 0,
-      bassEnergy: 0.4, midEnergy: 0.3, trebleEnergy: 0.1, attack: 0, sustain: 0.5,
-    };
-    const draw = (bassPulse: number): Buffer => {
+    const draw = (kick: number): Buffer => {
       context.clearRect(0, 0, 360, 640);
       context.fillStyle = "black";
       context.fillRect(0, 0, 360, 640);
@@ -194,7 +289,7 @@ describe("artwork preparation", () => {
       const savedAlpha = context.globalAlpha;
       context.globalCompositeOperation = "source-over";
       context.filter = "none";
-      drawArtwork(context, artwork, 12, { ...music, bassPulse });
+      drawArtwork(context, artwork, 12, { kick, section: 0.4 });
       expect(context.globalAlpha).toBe(savedAlpha);
       expect(context.globalCompositeOperation).toBe("source-over");
       expect(context.filter).toBe("none");
@@ -205,34 +300,32 @@ describe("artwork preparation", () => {
     const beat = draw(1);
     expect(beat.equals(quiet)).toBe(false);
     expect(draw(0).equals(quiet)).toBe(true);
-    let brightnessDifference = 0;
+    // The kick zooms the room without brightening it: the mean level of the
+    // frame moves by less than 2% while the texture visibly shifts.
+    let quietLevel = 0, beatLevel = 0;
     for (let index = 0; index < beat.length; index += 4) {
-      for (let channel = 0; channel < 3; channel += 1) brightnessDifference += Math.abs(beat[index + channel]! - quiet[index + channel]!);
+      for (let channel = 0; channel < 3; channel += 1) {
+        quietLevel += quiet[index + channel]!;
+        beatLevel += beat[index + channel]!;
+      }
     }
-    expect(brightnessDifference / (360 * 640 * 3)).toBeLessThan(0.5);
+    expect(Math.abs(beatLevel - quietLevel) / quietLevel).toBeLessThan(0.02);
   });
 
-  test("preserves source hues while bass has stronger saturation and beat response", () => {
-    const silent: MusicMotion = {
-      slowTime: 10, fastTime: 20, bassPulse: 0, treblePulse: 0,
-      bassEnergy: 0, midEnergy: 0, trebleEnergy: 0, attack: 0, sustain: 0,
-    };
-    const neutral = deriveArtworkMotion(20);
+  test("pushes in and brightens with the section, never grades the colour", () => {
+    const neutral = deriveArtworkMotion();
     expect(neutral.hueShift).toBe(0);
     expect(neutral.saturation).toBe(1);
-    const bass = deriveArtworkMotion(20, { ...silent, bassEnergy: 1 });
-    const treble = deriveArtworkMotion(20, { ...silent, trebleEnergy: 1 });
-    expect(bass.hueShift).toBe(0);
-    expect(treble.hueShift).toBe(0);
-    expect(bass.saturation - 1).toBeGreaterThan((treble.saturation - 1) * 2.5);
-    const loud = deriveArtworkMotion(20, {
-      ...silent, bassPulse: 100, bassEnergy: 100, midEnergy: 100, trebleEnergy: 100, sustain: 100,
-    });
-    expect(loud.saturation).toBeLessThanOrEqual(1.1);
+    expect(neutral.zoom).toBeCloseTo(1.06, 10);
+    expect(neutral.opacity).toBeCloseTo(0.8, 10);
+    const loud = deriveArtworkMotion(100, 100);
+    expect(loud.saturation).toBe(1);
     expect(loud.hueShift).toBe(0);
-    expect(loud.zoom).toBeLessThan(1.04);
-    expect(loud.opacity).toBeLessThanOrEqual(0.81);
-    expect(deriveArtworkMotion(20, { ...silent, bassPulse: 1 }).opacity).toBe(deriveArtworkMotion(20, silent).opacity);
-    expect(deriveArtworkMotion(20, { ...silent, bassEnergy: NaN }).hueShift).toBe(0);
+    expect(loud.zoom).toBeLessThan(1.25);
+    expect(loud.opacity).toBeLessThanOrEqual(0.95);
+    expect(loud.zoom).toBeGreaterThan(deriveArtworkMotion(1, 0).zoom);
+    // The kick zooms but never lifts the opacity.
+    expect(deriveArtworkMotion(0.3, 1).opacity).toBe(deriveArtworkMotion(0.3, 0).opacity);
+    expect(deriveArtworkMotion(NaN, NaN)).toEqual(neutral);
   });
 });

@@ -79,7 +79,8 @@ function spectrumStrip(source: Float32Array, angle: number, lowFlash: boolean): 
     }
   }
   for (let index = 0; index < values.length; index += 1) values[index] = bounded(values[index]!);
-  return { values, angle, rotation: [Math.cos(angle), Math.sin(angle)], strength: lowFlash ? 0.234 : 0.52 };
+  // A smooth environment reflection is not a flash; lowFlash only tempers it.
+  return { values, angle, rotation: [Math.cos(angle), Math.sin(angle)], strength: lowFlash ? 0.4 : 0.52 };
 }
 
 /** Same texture-center interpolation used by a GL_LINEAR/CLAMP_TO_EDGE strip. */
@@ -114,7 +115,9 @@ export function lightingAt(
   const sustain = bounded(motion.sustain);
   const bassPulse = bounded(motion.bassPulse);
   const treblePulse = bounded(motion.treblePulse);
-  const accent = lowFlash ? 0.18 : 1;
+  // Pulse accents are luminance transients, so lowFlash halves them (see
+  // LOW_FLASH_TRANSIENT_CAP); the envelopes below are never capped.
+  const accent = lowFlash ? 0.5 : 1;
   const phase = hashString(`${seed}:material-lights`) / 0x100000000 * Math.PI * 2;
   const hue = bounded(paletteHue, -1e9, 1e9) - palette.anchorHue;
   const keyAngle = phase + slow * 0.27;
@@ -126,26 +129,28 @@ export function lightingAt(
     lights: [
       {
         position: [Math.cos(keyAngle) * keyRadius, Math.sin(keyAngle * 0.83) * keyRadius, 1.05 + bassPulse * 0.3],
-        color: paletteRgb(palette, hue - 18 + bass * 18, 100, 67),
+        color: paletteRgb(palette, hue - 18 + bass * 18, 100, 56),
         intensity: 0.22 + bass * 1.15 + bassPulse * 1.1 * accent,
         falloff: 0.4,
       },
       {
         position: [Math.cos(fillAngle) * 0.74, Math.sin(fillAngle) * 0.68, 1.3],
-        color: paletteRgb(palette, hue + 120 + mids * 24, 100, 63),
+        color: paletteRgb(palette, hue + 120 + mids * 24, 100, 55),
         intensity: 0.12 + mids * 0.52 + sustain * 0.13,
         falloff: 0.5,
       },
       {
         position: [Math.cos(rimAngle) * 0.93, Math.sin(rimAngle) * 0.86, 0.38 + treble * 0.1],
-        color: paletteRgb(palette, hue + 240 + treble * 16, 82, 72),
+        color: paletteRgb(palette, hue + 240 + treble * 16, 100, 62),
         intensity: 0.065 + treble * 0.23 + treblePulse * 0.2 * accent,
         falloff: 0.85,
       },
     ],
-    ambient: paletteRgb(palette, hue + 30, 55, 64).map((value) => value * (0.105 + sustain * 0.018)) as Rgb,
+    ambient: paletteRgb(palette, hue + 30, 100, 60).map((value) => value * (0.105 + sustain * 0.018)) as Rgb,
     palette,
-    exposure: 1.16 + sustain * 0.1,
+    // The skin must sit above its own coloured halo; sustain lifts it further
+    // at peaks. Reinhard tone mapping in shadeSurface keeps it from clipping.
+    exposure: 1.45 + sustain * 0.5,
   };
   if (spectrum) {
     const strip = spectrumStrip(spectrum, phase + slow * 0.11, lowFlash);

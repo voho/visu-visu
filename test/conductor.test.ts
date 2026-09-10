@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { onsetEventsBetween } from "../src/audio/onsets.js";
 import {
   deriveChoreography,
+  deriveSectionLevel,
   deriveVisualState,
   LOW_FLASH_TRANSIENT_CAP,
+  presenceAt,
   type VisualState,
 } from "../src/render/conductor.js";
 import { ANALYSIS_VERSION, type AnalysisFrame, type AudioAnalysis } from "../src/types.js";
@@ -70,6 +72,7 @@ function visual(overrides: Partial<VisualState> = {}): VisualState {
     motion: 0.22,
     chapter: 0,
     form: 0,
+    warmth: 0.5,
     ...overrides,
   };
 }
@@ -225,6 +228,40 @@ describe("adaptive visual conductor", () => {
   });
 });
 
+describe("section level", () => {
+  test("is quiet in silence, full in the loud stretch, and rises monotonically across a step", () => {
+    const energies = Array.from({ length: 400 }, (_, index) => (index < 200 ? 0.05 : 0.9));
+    const analysis = makeAnalysis(energies, [], "section-step", 10);
+    expect(deriveSectionLevel(analysis, 5)).toBe(0);
+    expect(deriveSectionLevel(analysis, 35)).toBe(1);
+    let previous = -1;
+    for (let time = 14; time <= 26; time += 0.1) {
+      const level = deriveSectionLevel(analysis, time);
+      expect(level).toBeGreaterThanOrEqual(previous);
+      expect(level).toBeLessThanOrEqual(1);
+      previous = level;
+    }
+    // The symmetric 2.5 s window starts leaning in before the step and settles after it.
+    expect(deriveSectionLevel(analysis, 18.5)).toBeGreaterThan(0);
+    expect(deriveSectionLevel(analysis, 17)).toBeLessThan(1e-9);
+    expect(deriveSectionLevel(analysis, 23)).toBe(1);
+  });
+
+  test("is bit-identical for repeated and reverse-order queries and empty analyses", () => {
+    const analysis = stagedAnalysis();
+    const times = [0.5, 2.1, 3.9, 6.4, 8.8, 11.5];
+    const expected = times.map((time) => deriveSectionLevel(analysis, time));
+    for (const time of times.slice().reverse()) deriveSectionLevel(analysis, time);
+    expect(times.map((time) => deriveSectionLevel(analysis, time))).toEqual(expected);
+    expect(times.map((time) => deriveSectionLevel(stagedAnalysis(), time))).toEqual(expected);
+    expect(Math.max(...expected)).toBeGreaterThan(0.8);
+    expect(Math.min(...expected)).toBeLessThan(0.2);
+    expect(deriveSectionLevel(makeAnalysis([], [], "empty"), 1)).toBe(0);
+    // A non-finite time reads as the start of the song instead of indexing prefix[NaN].
+    expect(deriveSectionLevel(analysis, Number.NaN)).toBe(deriveSectionLevel(analysis, 0));
+  });
+});
+
 describe("visual choreography", () => {
   test("hands the composition from ambience through build and peak into release", () => {
     const ambient = deriveChoreography(visual(), 0, true);
@@ -287,5 +324,104 @@ describe("visual choreography", () => {
     expect(unrestricted.onset).toBeGreaterThan(restrained.onset);
     expect(unrestricted.modes).toEqual(restrained.modes);
     expect(unrestricted.layers).toEqual(restrained.layers);
+  });
+});
+
+describe("warmth", () => {
+  function centroidAnalysis(centroids: number[], name: string): AudioAnalysis {
+    const analysis = makeAnalysis(centroids.map(() => 0.5), [], name);
+    analysis.frames.forEach((frame, index) => { frame.centroid = centroids[index]!; });
+    return analysis;
+  }
+
+  test("spans the track's own centroid range, follows it monotonically and stays in 0..1", () => {
+    const centroids = Array.from({ length: 200 }, (_, index) => 0.1 + 0.3 * (index / 199));
+    const analysis = centroidAnalysis(centroids, "warmth-ramp");
+    let previous = -1;
+    for (let time = 0; time < 20; time += 0.5) {
+      const { warmth } = deriveVisualState(analysis, time);
+      expect(warmth).toBeGreaterThanOrEqual(previous);
+      expect(warmth).toBeWithin(0, 1.000001);
+      previous = warmth;
+    }
+    expect(deriveVisualState(analysis, 0.5).warmth).toBe(0);
+    expect(deriveVisualState(analysis, 19.5).warmth).toBe(1);
+    // The same centroid reads the same on a brighter master: p10..p90 of this track, not absolute values.
+    const brighter = centroidAnalysis(centroids.map((value) => value + 0.4), "warmth-bright");
+    expect(deriveVisualState(brighter, 10).warmth).toBeCloseTo(deriveVisualState(analysis, 10).warmth, 6);
+    // A flat centroid is neither cool nor warm, and a non-finite one is ignored.
+    const flat = centroidAnalysis(centroids.map(() => 0.3), "warmth-flat");
+    expect(deriveVisualState(flat, 5).warmth).toBeCloseTo(0.5, 6);
+    const broken = centroidAnalysis(centroids.map((value, index) => (index % 7 === 0 ? Number.NaN : value)), "warmth-nan");
+    expect(Number.isFinite(deriveVisualState(broken, 10).warmth)).toBe(true);
+    // A non-finite time reads like time 0 instead of leaking NaN into the state.
+    const atNaN = deriveVisualState(analysis, Number.NaN);
+    for (const value of Object.values(atNaN)) expect(Number.isFinite(value)).toBe(true);
+    expect(atNaN.warmth).toBe(deriveVisualState(analysis, 0).warmth);
+  });
+
+  test("is a section-scale signal: a centroid alternating with the beat reads as neutral", () => {
+    // 10 s dull, 10 s alternating every 0.2 s between dull and bright, 10 s bright (10 fps).
+    const alternating = Array.from({ length: 100 }, (_, index) => (Math.floor(index / 2) % 2 === 0 ? 0.2 : 0.8));
+    const centroids = [...Array.from({ length: 100 }, () => 0.2), ...alternating, ...Array.from({ length: 100 }, () => 0.8)];
+    const analysis = centroidAnalysis(centroids, "warmth-beat");
+    for (let time = 13; time <= 17; time += 0.1) expect(deriveVisualState(analysis, time).warmth).toBeWithin(0.35, 0.65);
+    expect(deriveVisualState(analysis, 5).warmth).toBeLessThan(0.05);
+    expect(deriveVisualState(analysis, 25).warmth).toBeGreaterThan(0.95);
+    // Nothing moves faster than the section window: no full swing inside one second.
+    for (let time = 0; time < 29; time += 0.1) {
+      expect(Math.abs(deriveVisualState(analysis, time + 1).warmth - deriveVisualState(analysis, time).warmth)).toBeLessThan(0.45);
+    }
+    // A track whose centroid only alternates with the beat stays neutral instead of
+    // having its residual ripple stretched to 0..1.
+    const onlyBeat = centroidAnalysis(alternating, "warmth-only-beat");
+    for (let time = 3; time <= 7; time += 0.5) expect(deriveVisualState(onlyBeat, time).warmth).toBeWithin(0.3, 0.7);
+  });
+
+  test("is deterministic for repeated, reverse-order and equivalent fresh analyses", () => {
+    const centroids = Array.from({ length: 120 }, (_, index) => 0.5 + 0.4 * Math.sin(index / 9));
+    const analysis = centroidAnalysis(centroids, "warmth-seek");
+    const times = [0.4, 3.3, 6.1, 9.7, 11.2];
+    const expected = times.map((time) => deriveVisualState(analysis, time).warmth);
+    for (const time of times.slice().reverse()) deriveVisualState(analysis, time);
+    expect(times.map((time) => deriveVisualState(analysis, time).warmth)).toEqual(expected);
+    expect(times.map((time) => deriveVisualState(centroidAnalysis(centroids, "warmth-seek"), time).warmth)).toEqual(expected);
+    expect(Math.max(...expected) - Math.min(...expected)).toBeGreaterThan(0.5);
+    expect(deriveVisualState(makeAnalysis([], [], "empty-warmth"), 1).warmth).toBe(0.5);
+  });
+});
+
+describe("sculpture presence", () => {
+  test("arrives over the first seconds and steps back to 45% before the end", () => {
+    const duration = 163;
+    expect(presenceAt(0, duration)).toBe(0);
+    expect(presenceAt(0.4, duration)).toBe(0);
+    expect(presenceAt(3.2, duration)).toBe(1);
+    expect(presenceAt(52, duration)).toBe(1);
+    expect(presenceAt(duration - 14, duration)).toBe(1);
+    expect(presenceAt(duration - 3, duration)).toBeCloseTo(0.45, 6);
+    expect(presenceAt(duration, duration)).toBeCloseTo(0.45, 6);
+    let previous = 0;
+    for (let time = 0; time <= 3.2; time += 0.05) {
+      const current = presenceAt(time, duration);
+      expect(current).toBeGreaterThanOrEqual(previous);
+      previous = current;
+    }
+    for (let time = duration - 14; time <= duration; time += 0.1) {
+      const current = presenceAt(time, duration);
+      expect(current).toBeLessThanOrEqual(previous + 1e-9);
+      previous = current;
+    }
+  });
+
+  test("shrinks both windows on short tracks and treats a missing duration as no departure", () => {
+    // A one-second fixture still shows the object for its middle; a six-second loop is fully present by 1.8 s.
+    expect(presenceAt(0.5, 1)).toBe(1);
+    expect(presenceAt(1.8, 6)).toBe(1);
+    expect(presenceAt(3.3, 6)).toBeCloseTo(1, 6);
+    expect(presenceAt(6, 6)).toBeCloseTo(0.45, 6);
+    expect(presenceAt(1000, NaN)).toBe(1);
+    expect(presenceAt(1000, 0)).toBe(1);
+    expect(presenceAt(NaN, 163)).toBe(0);
   });
 });

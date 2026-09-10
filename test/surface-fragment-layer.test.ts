@@ -14,7 +14,7 @@ import { fragmentCoverage, surfaceFragmentCandidates, surfaceFragmentPose } from
 
 const seed = "actual-surface-fragments";
 const plan = createResonancePlan(seed);
-const visual: VisualState = { ambient: 0.6, drive: 0.7, peak: 0.8, beat: 0.8, trend: 0.2, motion: 0.6, chapter: 0.4, form: 0.5 };
+const visual: VisualState = { ambient: 0.6, drive: 0.7, peak: 0.8, beat: 0.8, trend: 0.2, motion: 0.6, chapter: 0.4, form: 0.5, warmth: 0.5 };
 const frame: AnalysisFrame = {
   rms: 0.5, peak: 0.7, bass: 0.4, mid: 0.3, treble: 0.2, centroid: 0.4, flux: 0.1, onset: 0.2,
   spectrum: Float32Array.from({ length: 32 }, (_, index) => 0.2 + Math.sin(index * 0.3) * 0.1),
@@ -198,9 +198,9 @@ describe("departing pieces of the captured surface", () => {
       subject.render(audio, time);
       const state = subject.layer.inspect();
       expect(state.bursts).toBeLessThanOrEqual(3);
-      expect(state.pieces).toBeLessThanOrEqual(18);
-      expect(state.tears).toBeLessThanOrEqual(6);
-      expect(state.faces).toBeLessThan(18 * 150);
+      expect(state.pieces).toBeLessThanOrEqual(12);
+      expect(state.tears).toBeLessThanOrEqual(4);
+      expect(state.faces).toBeLessThan(12 * 300);
       expect(new Set(state.ids).size).toBe(state.pieces);
       expect(state.selection).toHaveLength(state.pieces);
       for (const patch of state.selection) {
@@ -216,7 +216,7 @@ describe("departing pieces of the captured surface", () => {
       }
       maximumPieces = Math.max(maximumPieces, state.pieces);
     }
-    expect(maximumPieces).toBeGreaterThanOrEqual(12);
+    expect(maximumPieces).toBeGreaterThanOrEqual(8);
     expect(shrunkenPatches).toBeGreaterThan(0);
     subject.render(audio, 1.7);
     expect(subject.layer.opacityAt).toBeDefined();

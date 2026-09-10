@@ -33,15 +33,15 @@ function analysis(sample: (time: number) => AnalysisFrame, duration = 90, fps = 
 }
 
 describe("song clip selection", () => {
-  test("selects a sustained drop with five seconds of build-up over isolated louder hits", () => {
+  test("selects a sustained drop with three seconds of build-up over isolated louder hits", () => {
     const source = analysis((time) => frame(time >= 40 && time < 66 ? 0.8 : time === 15 ? 1 : 0.08));
     const clip = selectClip(source);
     expect(clip.reason).toBe("drop");
     expect(clip.drop).toBe(40);
-    expect(clip.start).toBe(35);
+    expect(clip.start).toBe(37);
     expect(clip.duration).toBe(30);
-    expect(clip.end).toBe(65);
-    expect(clip.dropOffset).toBe(5);
+    expect(clip.end).toBe(67);
+    expect(clip.dropOffset).toBe(3);
     expect(selectClip(source)).toEqual(clip);
   });
 
@@ -51,7 +51,7 @@ describe("song clip selection", () => {
     ));
     const clip = selectClip(source);
     expect(clip.drop).toBe(55);
-    expect(clip.start).toBe(50);
+    expect(clip.start).toBe(52);
   });
 
   test("weights low frequencies above equal-energy high-frequency sections", () => {
@@ -73,16 +73,16 @@ describe("song clip selection", () => {
     }
   });
 
-  test("handles drops near the beginning and keeps five seconds of build-up near the end", () => {
+  test("handles drops near the beginning and keeps three seconds of build-up near the end", () => {
     const beginning = selectClip(analysis((time) => frame(time >= 1 && time < 26 ? 0.8 : 0.05)));
     expect(beginning.drop).toBe(1);
     expect(beginning.start).toBe(0);
     expect(beginning.dropOffset).toBe(1);
     const ending = selectClip(analysis((time) => frame(time >= 82 ? 0.85 : 0.05)));
     expect(ending.drop).toBe(82);
-    expect(ending.start).toBe(77);
-    expect(ending.duration).toBe(13);
-    expect(ending.dropOffset).toBe(5);
+    expect(ending.start).toBe(79);
+    expect(ending.duration).toBe(11);
+    expect(ending.dropOffset).toBe(3);
     expect(ending.end).toBe(90);
   });
 
@@ -90,9 +90,9 @@ describe("song clip selection", () => {
     const source = analysis(() => frame(0.2), 90.007, 60);
     const clip = selectClip(source, { drop: 86.217 });
     expect(clip.reason).toBe("manual");
-    expect(clip.start).toBeCloseTo(81.2166666667, 8);
+    expect(clip.start).toBeCloseTo(83.2166666667, 8);
     expect(clip.drop).toBe(86.217);
-    expect(clip.dropOffset).toBeCloseTo(5.0003333333, 8);
+    expect(clip.dropOffset).toBeCloseTo(3.0003333333, 8);
     expect(clip.end).toBe(source.duration);
     expect(clip.duration).toBeCloseTo(source.duration - clip.start, 10);
     const early = selectClip(source, { drop: 1.2 });
@@ -141,7 +141,7 @@ describe("song clip selection", () => {
       const source = analysis((time) => frame(time >= 45 && time < 74 ? 0.8 : time === 10 ? 1 : 0.08), 90, fps);
       const clip = selectClip(source);
       expect(clip.drop).toBe(45);
-      expect(clip.start).toBe(40);
+      expect(clip.start).toBe(42);
       expect(clip.duration).toBe(30);
     }
   });

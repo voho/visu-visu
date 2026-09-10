@@ -76,6 +76,43 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
   };
 }
 
+export interface SignalBand {
+  /** Rest line of the floor oscilloscope. */
+  scopeY: number;
+  /** Bars grow upward from here. */
+  barBaseline: number;
+  /** Tallest bar, so bars never reach the oscilloscope. */
+  barMax: number;
+}
+
+/**
+ * The music readouts live in the band below the graph, which no hero layer
+ * enters. The same height fractions serve every orientation; in portrait
+ * and square output the band deliberately enters the caption reserve as
+ * decoration, never carrying text.
+ */
+export function signalBand(layout: SafeLayout, height: number): SignalBand {
+  return {
+    scopeY: layout.graphBottom + height * 0.036,
+    barBaseline: layout.graphBottom + height * 0.14,
+    barMax: height * 0.082,
+  };
+}
+
+/**
+ * The ellipse around the title/artist lockup, in fractions of the frame. The
+ * cover is shaded inside it and the ember planes dim there, so the lockup
+ * stays the brightest, cleanest thing in the frame at any camera pose.
+ */
+export function creditLockupEllipse(layout: SafeLayout, width: number, height: number): { x: number; y: number; rx: number; ry: number } {
+  return {
+    x: layout.textCenterX / width,
+    y: (layout.titleY + 0.55 * (layout.graphTop - layout.titleY)) / height,
+    rx: 0.30,
+    ry: 0.11,
+  };
+}
+
 export function safeGraphRadius(layout: SafeLayout): number {
   return Math.min(
     layout.centerX - layout.left,

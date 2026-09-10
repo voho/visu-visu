@@ -26,7 +26,7 @@ function randomFor(seed) {
   };
 }
 
-/** Eighteen stable, unmirrored surface UV candidates; renderers choose at most six visible patches. */
+/** Eighteen stable, unmirrored surface UV candidates; renderers choose at most four visible patches. */
 export function surfaceFragmentCandidates(event, seed) {
   if (!validEvent(event)) return [];
   const random = randomFor(`${String(seed)}\u241fsurface-fragments\u241f${event.id}\u241f${event.captureTime}`);
@@ -37,8 +37,8 @@ export function surfaceFragmentCandidates(event, seed) {
     index,
     u: wrap(offsetU + (index % 6 + 0.18 + random() * 0.64) / 6),
     v: wrap(offsetV + (Math.floor(index / 6) + 0.18 + random() * 0.64) / 3),
-    halfU: 0.025 + random() * 0.018,
-    halfV: 0.045 + random() * 0.030,
+    halfU: 0.0375 + random() * 0.027,
+    halfV: 0.0675 + random() * 0.045,
     phase: random() * TAU,
     driftX: (random() < 0.5 ? -1 : 1) * (0.34 + random() * 0.46),
     driftY: -0.08 + random() * 0.26,

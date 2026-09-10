@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     intensity: 1,
     bokehCount: 48,
     spectrumBands: 64,
-    grain: 0.018,
+    grain: 0.03,
     vignette: 0.28,
     lowFlash: true,
   },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractPalette, paletteCss, paletteRgb, randomPalette, rgbHue } from "../src/render/palette.js";
+import { accentSwatches, extractPalette, paletteCss, paletteRgb, randomPalette, rgbHue, swatchFamilyDirection } from "../src/render/palette.js";
 import { createMaterial, recolorMaterial } from "../src/render/material.js";
 import type { Rgb } from "../src/render/lighting.js";
 
@@ -66,6 +66,79 @@ describe("artwork-derived RGB palette", () => {
     expect(paletteCss(palette, 0, 100, 50, 0.3)).toBe("rgba(255,0,0,0.3)");
   });
 
+  test("represents a muted cluster by its most chromatic pixel, repeatably", () => {
+    // Four vivid far colors take the remaining center slots, so the small
+    // vivid teal patch shares the grey-teal field's cluster instead of its own.
+    const field = [100, 128, 130, 255] as const;
+    const vivid = [84, 146, 142, 255] as const;
+    const pixels = sourcePixels([
+      ...Array.from({ length: 300 }, () => field),
+      ...Array.from({ length: 8 }, () => vivid),
+      ...Array.from({ length: 40 }, () => [220, 40, 30, 255] as const),
+      ...Array.from({ length: 40 }, () => [30, 60, 210, 255] as const),
+      ...Array.from({ length: 40 }, () => [240, 210, 60, 255] as const),
+      ...Array.from({ length: 40 }, () => [200, 40, 200, 255] as const),
+    ]);
+    const palette = extractPalette(pixels);
+    const bytes = palette.colors.map((rgb) => rgb.map((value) => Math.round(value * 255)));
+    expect(bytes).toHaveLength(5);
+    expect(bytes[0]).toEqual([84, 146, 142]);
+    expect(bytes).not.toContainEqual([100, 128, 130]);
+    expect(palette).toEqual(extractPalette(pixels));
+  });
+
+  test("names warm, cool, darkest and lightest swatches from real pigments", () => {
+    const sample = extractPalette(sourcePixels([
+      ...Array.from({ length: 50 }, () => [0x0e, 0x2e, 0x39, 255] as const),
+      ...Array.from({ length: 40 }, () => [0xab, 0x7e, 0x6e, 255] as const),
+      ...Array.from({ length: 30 }, () => [0xf6, 0xa7, 0x83, 255] as const),
+      ...Array.from({ length: 20 }, () => [0xfd, 0xcb, 0xb4, 255] as const),
+      ...Array.from({ length: 10 }, () => [0x33, 0x54, 0x5c, 255] as const),
+    ]));
+    const bytes = sample.colors.map((rgb) => rgb.map((value) => Math.round(value * 255)));
+    const accents = accentSwatches(sample);
+    expect(bytes[accents.warm]).toEqual([0xf6, 0xa7, 0x83]);
+    expect(bytes[accents.cool]).toEqual([0x0e, 0x2e, 0x39]);
+    expect(bytes[accents.darkest]).toEqual([0x0e, 0x2e, 0x39]);
+    expect(bytes[accents.lightest]).toEqual([0xfd, 0xcb, 0xb4]);
+    expect(accentSwatches(sample)).toEqual(accents);
+    const grey = extractPalette(sourcePixels([
+      ...Array.from({ length: 60 }, () => [40, 40, 40, 255] as const),
+      ...Array.from({ length: 30 }, () => [140, 140, 140, 255] as const),
+    ]));
+    expect(accentSwatches(grey)).toMatchObject({ warm: 0, cool: 0 });
+    // One warm family only: the two most chromatic swatches take both roles.
+    const orange = extractPalette(sourcePixels([
+      ...Array.from({ length: 60 }, () => [230, 110, 35, 255] as const),
+      ...Array.from({ length: 30 }, () => [120, 70, 40, 255] as const),
+    ]));
+    const single = accentSwatches(orange);
+    expect(single.warm).not.toBe(single.cool);
+    expect(orange.colors[single.warm]!.map((value) => Math.round(value * 255))).toEqual([230, 110, 35]);
+  });
+
+  test("spreads each accent toward the ring neighbour of its own hue family", () => {
+    // Ring by weight: dark teal, peach-brown, peach, light peach, teal. The
+    // cool accent (index 0) must walk backwards to the teal at index 4, never
+    // forward into the peach-brown; the warm peach walks to the light peach.
+    const sample = extractPalette(sourcePixels([
+      ...Array.from({ length: 50 }, () => [0x0e, 0x2e, 0x39, 255] as const),
+      ...Array.from({ length: 40 }, () => [0xab, 0x7e, 0x6e, 255] as const),
+      ...Array.from({ length: 30 }, () => [0xf6, 0xa7, 0x83, 255] as const),
+      ...Array.from({ length: 20 }, () => [0xfd, 0xcb, 0xb4, 255] as const),
+      ...Array.from({ length: 10 }, () => [0x33, 0x54, 0x5c, 255] as const),
+    ]));
+    const accents = accentSwatches(sample);
+    expect(swatchFamilyDirection(sample, accents.cool)).toBe(-1);
+    expect(swatchFamilyDirection(sample, accents.warm)).toBe(1);
+    const coolStep = swatchFamilyDirection(sample, accents.cool) * 360 / sample.colors.length * 0.6;
+    expect(degreesApart(rgbHue(paletteRgb(sample, accents.cool * 360 / sample.colors.length + coolStep)), 195)).toBeLessThan(6);
+    // Too few swatches to have two neighbours, or a bad index: forward.
+    expect(swatchFamilyDirection({ source: "random", colors: [[1, 0, 0], [0, 0, 1]], anchorHue: 0 }, 0)).toBe(1);
+    expect(swatchFamilyDirection(sample, 9)).toBe(1);
+    expect(swatchFamilyDirection(sample, Number.NaN)).toBe(1);
+  });
+
   test("fully transparent artwork supplies neutral light and malformed controls stay bounded", () => {
     const palette = extractPalette(sourcePixels([[255, 0, 255, 0], [0, 255, 0, 0]]));
     expect(palette.colors).toEqual([[0.5, 0.5, 0.5]]);
@@ -89,6 +162,19 @@ describe("seeded fallback and material recoloring", () => {
     for (let index = 0; index < 96; index += 1) hueSectors.add(Math.floor(randomPalette(`coverage-${index}`).anchorHue / 60));
     expect(hueSectors.size).toBe(6);
     expect(randomPalette("fallback-palette-amber")).toEqual(first);
+  });
+
+  test("every seeded palette anchors swatch 0 and holds two real color families", () => {
+    for (let index = 0; index < 48; index += 1) {
+      const palette = randomPalette(`families-${index}`);
+      expect(palette.colors).toHaveLength(5);
+      expect(degreesApart(rgbHue(palette.colors[0]!), palette.anchorHue)).toBeLessThan(1);
+      const hues = palette.colors.map(rgbHue);
+      let widest = 0;
+      for (const a of hues) for (const b of hues) widest = Math.max(widest, degreesApart(a, b));
+      expect(widest).toBeGreaterThanOrEqual(120);
+      for (const rgb of palette.colors) expect(Math.max(...rgb) - Math.min(...rgb)).toBeGreaterThan(0.2);
+    }
   });
 
   test("removes baked pigment without changing normals, height, roughness or transparency", () => {

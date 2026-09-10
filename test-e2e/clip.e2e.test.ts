@@ -99,19 +99,31 @@ function textInk(frame: Buffer, region: TextRegion): { pixels: number[]; height:
 }
 
 function coverInk(frame: Buffer, region: TextRegion): { pixels: number; left: number; right: number; top: number; bottom: number } {
+  const columns = new Uint16Array(smallWidth);
+  const rows = new Uint16Array(smallHeight);
   let pixels = 0;
-  let left = region.right, right = region.left, top = region.bottom, bottom = region.top;
   for (let y = region.top; y < region.bottom; y++) for (let x = region.left; x < region.right; x++) {
     const index = (y * smallWidth + x) * 3;
     const r = frame[index]!, g = frame[index + 1]!, b = frame[index + 2]!;
-    // The fixture's orange checks distinguish the bright thumbnail from white
-    // credit ink. The subdued background remains below this color threshold.
-    if (r > 160 && r > g * 1.35 && b < 180) {
+    // The fixture's orange checks distinguish the ungraded thumbnail from white
+    // credit ink and from the cover room behind the credits: the room caps
+    // every channel at 215 and sits under the credit shade, so only the sharp
+    // thumbnail keeps the source's full orange.
+    if (r > 220 && r > g * 1.35 && b < 180) {
       pixels++;
-      left = Math.min(left, x); right = Math.max(right, x);
-      top = Math.min(top, y); bottom = Math.max(bottom, y);
+      columns[x] = columns[x]! + 1;
+      rows[y] = rows[y]! + 1;
     }
   }
+  // A few stray orange pixels (a tracer, a hit lift) must not stretch the box:
+  // the thumbnail is the block whose rows and columns are densely orange.
+  const dense = (counts: Uint16Array, start: number, end: number): [number, number] => {
+    let first = end, last = start;
+    for (let index = start; index < end; index++) if (counts[index]! >= 6) { first = Math.min(first, index); last = Math.max(last, index); }
+    return [first, last];
+  };
+  const [left, right] = dense(columns, region.left, region.right);
+  const [top, bottom] = dense(rows, region.top, region.bottom);
   return { pixels, left, right, top, bottom };
 }
 
@@ -146,9 +158,9 @@ describe("portrait clip end to end", () => {
     };
     expect(plan).toMatchObject({ width: 1080, height: 1920, fps, duration, renderedDuration: duration,
       reason: "drop", title: "RESONANCE", artist: "VISU VISU", fadeInSeconds: 0.35, fadeOutSeconds: 3 });
-    expect(plan.start).toBeCloseTo(4, 1);
+    expect(plan.start).toBeCloseTo(6, 1);
     expect(plan.drop).toBeCloseTo(9, 1);
-    expect(plan.dropOffset).toBeCloseTo(5, 8);
+    expect(plan.dropOffset).toBeCloseTo(3, 8);
     expect(plan.end - plan.start).toBe(duration);
     expect(await access(outputPath).then(() => true, () => false)).toBe(false);
 
@@ -210,7 +222,8 @@ describe("portrait clip end to end", () => {
     expect(quiet).toBeGreaterThan(0.01);
     expect(loud / quiet).toBeGreaterThan(8);
     let audibleDrop = -1;
-    for (let time = 4; time < 6; time += 0.025) {
+    // The drop lands three seconds in; search from well before it.
+    for (let time = 1.5; time < 6; time += 0.025) {
       if (rms(samples, time, time + 0.025) > (quiet + loud) / 2) { audibleDrop = time; break; }
     }
     expect(Math.abs(audibleDrop - plan.dropOffset)).toBeLessThan(0.1);

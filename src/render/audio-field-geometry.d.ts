@@ -11,6 +11,8 @@ export interface AudioFieldGeometry {
   wave: AudioFieldPoint[];
   waveAlpha: number;
 }
+/** Monotone cubic sample of a signed series at position 0..1; never overshoots. */
+export function smoothSample(values: ArrayLike<number>, position: number): number;
 export function audioFieldGeometry(
   spectrum: ArrayLike<number>, waveform: ArrayLike<number>, fast: number, slow: number, phase: number,
 ): AudioFieldGeometry;

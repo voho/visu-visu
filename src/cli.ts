@@ -52,7 +52,7 @@ Render options:
 
 Clip options (portrait Full HD60, up to 30 seconds):
       --drop <seconds>      Use a known drop timestamp instead of auto-selection
-      --lead-in <seconds>   Time before the drop (default: min(5, duration/2))
+      --lead-in <seconds>   Time before the drop (default: min(3, duration/2))
       --duration <seconds>  Maximum clip length (default: 30; range: >0–30)
       --fade-in <seconds>   Brief picture/audio entrance (default: 0.35)
       --fade-out <seconds>  Picture/audio end fade (default: 3)

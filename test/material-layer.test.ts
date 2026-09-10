@@ -13,12 +13,12 @@ const quiet: MusicMotion = {
 const map = createMaterialFromHeight(Float32Array.from({ length: 16 * 16 }, (_, index) =>
   0.5 + Math.sin(index % 16 * Math.PI / 8) * 0.2), 16, 16);
 
-function render(layer: MaterialLightLayer, width: number, height: number, lights: LightingState, strength = 0.65, zoom = 1): Uint8ClampedArray {
+function render(layer: MaterialLightLayer, width: number, height: number, lights: LightingState, strength = 0.65): Uint8ClampedArray {
   const canvas = createCanvas(width, height);
   const context = canvas.getContext("2d");
   context.fillStyle = "rgb(8,12,16)";
   context.fillRect(0, 0, width, height);
-  layer.draw(context, lights, strength, zoom);
+  layer.draw(context, lights, strength);
   return context.getImageData(0, 0, width, height).data;
 }
 
@@ -31,12 +31,12 @@ function difference(left: Uint8ClampedArray, right: Uint8ClampedArray): number {
 }
 
 describe("subtle material light layer", () => {
-  test("adds bounded texture light below the credits, including at the strongest artwork zoom", () => {
+  test("adds bounded texture light below the credits", () => {
     const lights = lightingAt({ ...quiet, bassEnergy: 1, bassPulse: 1, midEnergy: 1, trebleEnergy: 1, sustain: 1 }, 1, "layer", 210);
     for (const [width, height] of [[640, 360], [360, 640]] as const) {
       const layout = createSafeLayout(width, height);
-      const layer = new MaterialLightLayer(width, height, map, layout, true);
-      const pixels = render(layer, width, height, lights, 1, 1.039);
+      const layer = new MaterialLightLayer(width, height, map, layout);
+      const pixels = render(layer, width, height, lights, 1);
       let maximumAdded = 0;
       let totalAdded = 0;
       let creditChanged = 0;
@@ -53,8 +53,8 @@ describe("subtle material light layer", () => {
       expect(creditChanged).toBe(0);
       expect(maximumAdded).toBeGreaterThan(8);
       expect(maximumAdded).toBeLessThan(40);
-      // Even an opaque synthetic cover at maximum strength adds under 6.5%
-      // average brightness; real cover masks and the default 0.65 reduce it.
+      // Even an opaque synthetic material at maximum strength adds under 6.5%
+      // average brightness; the default 0.65 reduces it further.
       expect(totalAdded / (width * height * 3)).toBeLessThan(255 * 0.065);
     }
   });
@@ -68,7 +68,6 @@ describe("subtle material light layer", () => {
     const off = render(layer, width, height, lights, 0);
     for (const strength of [-1, NaN, Infinity]) expect(render(layer, width, height, lights, strength)).toEqual(off);
     expect(render(layer, width, height, lights, 20)).toEqual(render(layer, width, height, lights, 1));
-    expect(render(layer, width, height, lights, 1, NaN)).toEqual(render(layer, width, height, lights, 1));
     const transparent = { ...map, albedo: map.albedo.slice() };
     for (let index = 3; index < transparent.albedo.length; index += 4) transparent.albedo[index] = 0;
     const hidden = new MaterialLightLayer(width, height, transparent, layout);

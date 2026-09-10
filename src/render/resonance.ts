@@ -29,7 +29,11 @@ export interface ResonanceCamera {
   y: number;
   roll: number;
   zoom: number;
+  /** Share of the safe graph the sculpture may fill (default 0.94); the section level sizes it. */
+  fit?: number;
 }
+
+const DEFAULT_FIT = 0.94;
 
 export interface ResonancePoint {
   x: number;
@@ -37,6 +41,8 @@ export interface ResonancePoint {
   /** Normalized camera depth: 0 is distant; 1 is near; .5 divides the object. */
   depth: number;
   energy: number;
+  /** Poloidal spectrum position sampled here: 0 bass (warm pigment) .. 1 treble (cool). */
+  band: number;
   /** Camera-space position before perspective/viewport fit; Y points up. */
   surfaceX: number;
   surfaceY: number;
@@ -217,7 +223,7 @@ export function createResonanceFilaments(
         + Math.sin(u * 3 + drift * 0.45) * (0.25 + mid * 0.12);
       const v = flow + Math.sin(flow * 2) * (0.26 + flower * 0.2);
       const lobe = Math.cos(u * 3 - drift * 0.62);
-      const major = 0.57 - orb * 0.2 + bass * 0.045 + drive * 0.02 + peak * 0.025
+      const major = 0.57 - orb * 0.2 + bass * 0.09 + drive * 0.02 + peak * 0.025
         + beat * 0.004 + displacement * 0.12 + wave * 0.04
         + lobe * (0.035 + flower * 0.065 + bass * 0.12) * (1 - orb * 0.4)
         + Math.sin(u * 2 + drift * 0.4) * (0.02 + mid * 0.025 + displacement * 0.035)
@@ -269,6 +275,7 @@ export function createResonanceFilaments(
         y: normalizedY,
         depth,
         energy,
+        band: bandPosition,
         surfaceX: projectedX,
         surfaceY: -projectedY,
         surfaceZ: rotatedZ,
@@ -280,14 +287,16 @@ export function createResonanceFilaments(
     return {
       points,
       hueOffset: strand.hueOffset,
-      alpha: strand.strength * (0.32 + drive * 0.18 + peak * 0.12 + beat * 0.028),
+      alpha: strand.strength * (0.24 + drive * 0.18 + peak * 0.26 + beat * 0.028),
       depth: depthSum / POINT_COUNT,
     };
   });
   // A smooth bounded close-up lets compact poses fill the scene, while still
   // leaving room for folds, drift and light. One scalar preserves the outline;
   // the soft floor avoids pumping the camera on edge-on poses or FFT boundaries.
-  const fit = 0.94 / Math.pow(projectedExtent ** 8 + 0.70 ** 8, 1 / 8);
+  // The caller's fit makes the object small and wispy in quiet passages and
+  // large at peaks without touching the morphing.
+  const fit = (camera?.fit ?? DEFAULT_FIT) / Math.pow(projectedExtent ** 8 + 0.70 ** 8, 1 / 8);
   for (const strand of filaments) {
     for (const point of strand.points) {
       point.x = layout.centerX + point.x * fit * radiusX;

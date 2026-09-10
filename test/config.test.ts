@@ -24,7 +24,7 @@ describe("project configuration", () => {
     expect(config.output.preset).toBe("fast");
     expect(config.output.maxBitrateMbps).toBe(16);
     expect(config.output.fadeSeconds).toBe(3);
-    expect(config.visual.grain).toBe(0.018);
+    expect(config.visual.grain).toBe(0.03);
     expect(config).toEqual(DEFAULT_CONFIG);
   });
 

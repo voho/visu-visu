@@ -1,5 +1,5 @@
 import type { SKRSContext2D } from "@napi-rs/canvas";
-import { clamp } from "../math/random.js";
+import { clamp, lerp } from "../math/random.js";
 import type { AnalysisFrame } from "../types.js";
 import { shadeSurface, type LightingState, type Rgb } from "./lighting.js";
 import type { MaterialMap, MaterialSample } from "./material.js";
@@ -139,8 +139,10 @@ function renderOrCaptureSurface(
     const spectrumReflection = Math.exp(-spectrumDistance * spectrumDistance) * spectrum * 0.15;
     // A common display gain preserves photographic hues; per-channel gamma
     // would change them and wash out the input image's spatial color details.
-    const photoGain = 1 / Math.sqrt(Math.max(0.01, rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722));
-    const reflectionScale = artwork ? 0.5 : 1;
+    // Only half of the shadow lift is applied: a full 1/sqrt gain flattened
+    // the key light's contrast so the skin read as a grey blob at peaks.
+    const photoGain = lerp(1, 1 / Math.sqrt(Math.max(0.01, rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722)), 0.7);
+    const reflectionScale = artwork ? 0.85 : 1;
     const r = (artwork ? rgb[0] * photoGain : Math.sqrt(rgb[0]))
       + (lights.lights[0].color[0] * scopeReflection + lights.lights[1].color[0] * spectrumReflection) * reflectionScale;
     const g = (artwork ? rgb[1] * photoGain : Math.sqrt(rgb[1]))

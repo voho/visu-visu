@@ -33,10 +33,10 @@ describe("captured surface fragments", () => {
       expect(piece.u).toBeLessThan(1);
       expect(piece.v).toBeGreaterThanOrEqual(0);
       expect(piece.v).toBeLessThan(1);
-      expect(piece.halfU).toBeGreaterThanOrEqual(0.025);
-      expect(piece.halfU).toBeLessThanOrEqual(0.043);
-      expect(piece.halfV).toBeGreaterThanOrEqual(0.045);
-      expect(piece.halfV).toBeLessThanOrEqual(0.075);
+      expect(piece.halfU).toBeGreaterThanOrEqual(0.0375);
+      expect(piece.halfU).toBeLessThanOrEqual(0.0645);
+      expect(piece.halfV).toBeGreaterThanOrEqual(0.0675);
+      expect(piece.halfV).toBeLessThanOrEqual(0.1125);
       for (const time of [6, 1.5, 7, 3, 0]) surfaceFragmentPose(event, piece, time);
     }
     expect(candidates).toEqual(saved);

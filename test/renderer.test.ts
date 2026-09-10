@@ -115,4 +115,68 @@ describe("visualizer renderer", () => {
     const portrait = new VisualizerRenderer(portraitConfig, "fixed-seed").render(analysis, 0.5);
     expect(portrait.byteLength).toBe(180 * 320 * 4);
   });
+
+  test("reports every render stage in draw order to the profiler without changing a pixel", () => {
+    const sampleRate = 24_000;
+    const analysis = analyzeAudio({
+      samples: Float32Array.from({ length: sampleRate }, (_, index) =>
+        Math.sin((2 * Math.PI * 180 * index) / sampleRate) * 0.55),
+      sampleRate, duration: 1, sourceHash: "profiled", sourceFileHash: "profiled-file",
+    }, 12, 32);
+    const config = parseProjectConfig({
+      output: { width: 320, height: 180, fps: 12 },
+      text: { title: "Profiled", artist: "Test" },
+      visual: { bokehCount: 12, spectrumBands: 32 },
+    });
+    const plain = new VisualizerRenderer(config, "profiled").render(analysis, 0.8);
+    const profiled = new VisualizerRenderer(config, "profiled");
+    const stages: string[] = [];
+    profiled.profiler = (stage, surface) => {
+      surface.getContext("2d").getImageData(0, 0, 1, 1);
+      stages.push(stage);
+    };
+    expect(Buffer.from(profiled.render(analysis, 0.8)).equals(Buffer.from(plain))).toBe(true);
+    expect(stages).toEqual([
+      "signals", "room", "emission", "bloom", "ghosts", "composite", "band", "hits", "skin",
+      "filaments", "fragments", "embers", "post", "dither", "vignette", "typography", "readback",
+    ]);
+  });
+
+  test("keeps every hit inside the flash budget under lowFlash while still registering", () => {
+    const sampleRate = 24_000;
+    const duration = 3;
+    const pcm: AudioPcm = {
+      samples: Float32Array.from({ length: sampleRate * duration }, (_, index) =>
+        Math.sin((2 * Math.PI * 180 * index) / sampleRate) * 0.55,
+      ),
+      sampleRate,
+      duration,
+      sourceHash: "dense-hits",
+      sourceFileHash: "dense-hits-file",
+    };
+    const fps = 12;
+    const analysis = analyzeAudio(pcm, fps, 32);
+    // An onset every 0.25 s; the plan's refractory keeps every other one (0.25, 0.75, 1.25, ...).
+    for (let index = 3; index < analysis.frames.length; index += 3) analysis.frames[index]!.onset = 1;
+    const config = parseProjectConfig({
+      output: { width: 320, height: 180, fps },
+      text: { title: "Budget", artist: "Test" },
+      visual: { bokehCount: 12, spectrumBands: 32, lowFlash: true },
+    });
+    const meanLuma = (buffer: Buffer): number => {
+      let sum = 0;
+      for (let index = 0; index < buffer.length; index += 4) {
+        sum += buffer[index]! * 0.2126 + buffer[index + 1]! * 0.7152 + buffer[index + 2]! * 0.0722;
+      }
+      return sum / (buffer.length / 4) / 255;
+    };
+    const renderer = new VisualizerRenderer(config, "budget-seed");
+    const hitTime = 1.25;
+    const onHit = meanLuma(Buffer.from(renderer.render(analysis, hitTime + 1 / fps)));
+    const later = meanLuma(Buffer.from(renderer.render(analysis, hitTime + 0.4)));
+    expect(Math.abs(onHit - later)).toBeLessThanOrEqual(0.08);
+    // The floor only proves the hit registers at all (lift + burst + ring on a
+    // small, chapter-0 hit); the budget is the upper bound.
+    expect(Math.abs(onHit - later)).toBeGreaterThanOrEqual(0.003);
+  });
 });

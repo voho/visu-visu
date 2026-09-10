@@ -22,7 +22,7 @@ const frame: AnalysisFrame = {
   spectrum: new Float32Array(64).fill(0.25),
   waveform: new Float32Array(192),
 };
-const visual: VisualState = { ambient: 0.7, drive: 0.6, peak: 0.5, beat: 0.6, trend: 0.2, motion: 0.6, chapter: 0.4, form: 0.4 };
+const visual: VisualState = { ambient: 0.7, drive: 0.6, peak: 0.5, beat: 0.6, trend: 0.2, motion: 0.6, chapter: 0.4, form: 0.4, warmth: 0.5 };
 const filaments = createResonanceFilaments(createResonancePlan("mesh-test"), frame, visual, layout, 5, false, motion);
 const material = createMaterial("mesh-test", 32);
 const lights = lightingAt(motion, 5, "mesh-test", 210);
