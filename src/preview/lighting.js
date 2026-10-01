@@ -6,6 +6,7 @@ import { createSculptureGlow } from '/lighting-glow.js';
 import { createDepthParticles } from '/lighting-particles.js';
 import { createSculptureLensing } from '/lighting-lensing.js';
 import { createSurfaceFragments } from '/lighting-fragments.js';
+import { createSpectralFlow } from '/lighting-flow.js';
 const canvas = document.querySelector('#scene');
 const audio = document.querySelector('#audio');
 const play = document.querySelector('#play');
@@ -411,6 +412,7 @@ async function start() {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 32, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, strip);
   }
   const fragments=createSurfaceFragments(profile,sampleTimeline,uploadSignals,drawSculpture);
+  const spectralFlow=createSpectralFlow(gl,profile,sampleTimeline);
   const lensing=profile.hasArtwork?createSculptureLensing(gl,(captureTime,width,height)=>{
     sampleTimeline(captureTime,lensValues);uploadSignals(lensValues);
     drawSculpture(lensValues,width,height,-1);
@@ -487,6 +489,7 @@ async function start() {
       gl.uniform1f(uniform('uView'), mode);
       lensing?.bind();gl.uniform1i(uniform('uLensing'),6);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if(mode===0)spectralFlow.draw(time,values,width,height);
       if(mode===0){glow.draw(values,width,height);drawParticles(values,width,height,false);}
       if (mode === 0) { audioField.update(values, width, height); audioField.draw(false); }
       if (mode === 0) history.draw(time, width, height);
@@ -507,7 +510,7 @@ async function start() {
     }
     seek.value = String(time);
     document.querySelector('#elapsed').textContent = clock(time);
-    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time), lensing:lensing?.inspect(), fragments:fragments.inspect(time) });
+    Object.assign(window.lightingPreview, { fps, time, width, height, mode, history: history.inspect(time), lensing:lensing?.inspect(), fragments:fragments.inspect(time), spectralFlow:spectralFlow.inspect() });
     if (!gl.isContextLost()) requestAnimationFrame(draw);
   }
   play.addEventListener('click', async () => {

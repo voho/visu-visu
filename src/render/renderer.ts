@@ -14,6 +14,7 @@ import { MaterialLightLayer } from "./material-layer.js";
 import { sampleResonanceMaterial } from "./surface-material.js";
 import { drawMaterialSurface, type SurfaceCoverage } from "./surface-mesh.js";
 import { SurfaceFragmentLayer, type FragmentSource } from "./surface-fragment-layer.js";
+import { SpectralFlowLayer } from "./spectral-flow-layer.js";
 import { deriveSceneDynamics, type SceneDynamics } from "./scene-dynamics.js";
 import { drawAtmosphericBloom, inertialMusicMotion, ringReachWithin, sceneCameraAt, sceneCameraMatrix, sculptureFit, type SceneCameraPose } from "./scene-optics.js";
 import { drawSignalBand, signalBandAt, type SignalBandFrame, type SignalStripStyle } from "./signal-strip.js";
@@ -88,7 +89,7 @@ interface FrameState {
 
 /** Names of the render stages, in draw order, as reported to the profiler hook. */
 export type RenderStage =
-  | "signals" | "room" | "emission" | "bloom" | "ghosts" | "composite" | "band" | "skin"
+  | "signals" | "room" | "flow" | "emission" | "bloom" | "ghosts" | "composite" | "band" | "skin"
   | "filaments" | "hits" | "fragments" | "embers" | "post" | "dither" | "vignette" | "typography" | "readback";
 
 /** Seconds until the title lockup has fully faded and risen into place. */
@@ -163,6 +164,7 @@ export class VisualizerRenderer {
   private readonly layout: SafeLayout;
   private readonly frozenClouds: FrozenCloudLayer;
   private readonly surfaceFragments: SurfaceFragmentLayer;
+  private readonly spectralFlow: SpectralFlowLayer;
   private readonly material: MaterialMap;
   private readonly materialLight: MaterialLightLayer;
   private backgroundCacheKey = "";
@@ -214,6 +216,7 @@ export class VisualizerRenderer {
     this.layout = createSafeLayout(this.width, this.height);
     this.frozenClouds = new FrozenCloudLayer(this.width, this.height, this.layout, this.seed);
     this.surfaceFragments = new SurfaceFragmentLayer(this.layout, this.seed);
+    this.spectralFlow = new SpectralFlowLayer(this.width, this.height, this.layout, this.palette, this.seed, config.visual.lowFlash);
     const atmosphereMaterial = recolorMaterial(createMaterial(seed), this.palette);
     this.material = artwork?.objectMaterial ?? atmosphereMaterial;
     this.materialLight = new MaterialLightLayer(this.width, this.height, atmosphereMaterial, this.layout);
@@ -413,6 +416,8 @@ export class VisualizerRenderer {
     // The far plane lives in the room, under the sculpture's bloom.
     drawEmbers(output, this.embers, this.emberColors, emberDrive, "far");
     this.profiler?.("room", this.canvas);
+    this.spectralFlow.draw(output, analysis, time, this.config.visual.intensity);
+    this.profiler?.("flow", this.canvas);
 
     const background = this.backgroundContext;
     resetContext(background, this.backgroundWidth, this.backgroundHeight);

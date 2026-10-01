@@ -137,7 +137,7 @@ describe("visualizer renderer", () => {
     };
     expect(Buffer.from(profiled.render(analysis, 0.8)).equals(Buffer.from(plain))).toBe(true);
     expect(stages).toEqual([
-      "signals", "room", "emission", "bloom", "ghosts", "composite", "band", "hits", "skin",
+      "signals", "room", "flow", "emission", "bloom", "ghosts", "composite", "band", "hits", "skin",
       "filaments", "fragments", "embers", "post", "dither", "vignette", "typography", "readback",
     ]);
   });
