@@ -1,6 +1,6 @@
 import { sha256 } from "../math/random.js";
 import { hashFile } from "../audio/decode.js";
-import { renderDimensions } from "../config.js";
+import { renderDimensions, validatePromoRequirements } from "../config.js";
 import {
   ANALYSIS_VERSION,
   RENDERER_VERSION,
@@ -63,9 +63,10 @@ export function resolveRenderSeed(config: ProjectConfig, analysis: AudioAnalysis
       config.output.fps,
       config.visual.spectrumBands,
       RENDERER_VERSION,
-      ...(config.visual.engine === "milkdrop" ? ["milkdrop-2"] : []),
-      ...(config.visual.engine === "milkdrop" && config.visual.milkdropPresets?.length
+      ...((config.visual.engine === "milkdrop" || config.visual.mode === "promo") ? ["milkdrop-2"] : []),
+      ...((config.visual.engine === "milkdrop" || config.visual.mode === "promo") && config.visual.milkdropPresets?.length
         ? ["playlist", ...config.visual.milkdropPresets] : []),
+      ...(config.visual.mode === "promo" ? ["promo-1"] : []),
     ].join(":"),
   ).slice(0, 16);
 }
@@ -75,6 +76,11 @@ export async function renderVideo(
   analysis: AudioAnalysis,
   onProgress?: (progress: RenderProgress) => void,
 ): Promise<RenderResult> {
+  validatePromoRequirements(request.config);
+  // Direct API callers can supply an unparsed config; promo always uses MilkDrop.
+  if (request.config.visual.mode === "promo" && request.config.visual.engine !== "milkdrop") {
+    request = { ...request, config: { ...request.config, visual: { ...request.config.visual, engine: "milkdrop" } } };
+  }
   await validateRenderAnalysis(request.audioPath, request.config, analysis);
   if (!Number.isFinite(request.start) || request.start < 0 || request.start >= analysis.duration) {
     throw new Error(`Start time must be a finite number between 0 and ${analysis.duration.toFixed(3)} seconds`);
@@ -92,7 +98,9 @@ export async function renderVideo(
   const seed = resolveRenderSeed(request.config, analysis);
   const renderSize = renderDimensions(request.config);
   // Decode before opening the output: a bad image must not truncate an existing MP4.
-  const artwork = await prepareArtwork(request.config.visual.imagePath, renderSize.width, renderSize.height);
+  const thumbnailSize = request.config.visual.mode === "promo"
+    ? Math.min(1024, Math.max(256, Math.ceil(Math.min(renderSize.width, renderSize.height) * 0.5))) : 256;
+  const artwork = await prepareArtwork(request.config.visual.imagePath, renderSize.width, renderSize.height, thumbnailSize);
   if (request.config.visual.engine === "milkdrop") {
     const { renderMilkdrop } = await import("../milkdrop/export.js");
     return await renderMilkdrop(request, analysis, { duration, totalFrames, seed, renderSize, artwork }, onProgress);

@@ -73,6 +73,27 @@ bun run preview -- ./song.mp3 --overwrite
 The preview script still writes a `1920×1080` delivery file, but renders its Canvas scene at half scale and uses a faster quality profile. Set `--start 45` to inspect a later section.
 
 
+## Promo mode
+
+Use `--mode promo` for an artwork-led release video. A cover image, song title and artist are required; `--title` and `--artist` take precedence over config values, and missing credits are read from the audio tags. An untagged source needs explicit credits. Promo automatically selects the MilkDrop engine and requires Chrome or Chromium as described below.
+
+```sh
+bun run render:promo -- ./song.wav --image ./cover.png \
+  --title "Night Signal" --artist "Artist Name" --output ./renders/promo.mp4
+
+# Eight-second draft; native Full HD 60 is the default without preview quality.
+bun run render:promo -- ./song.wav --image ./cover.png \
+  --title "Night Signal" --artist "Artist Name" --duration 8 --quality preview
+
+# The same composition also supports an automatically selected portrait clip.
+bun run clip -- ./song.wav --mode promo --image ./cover.png \
+  --title "Night Signal" --artist "Artist Name"
+```
+
+The complete cover supplies the palette for the background and musical readouts. An immersive MilkDrop playlist blends **martin - tunnel race** and **martin - mandelbox explorer - high speed demo version** by default; `--milkdrop-presets` replaces it with an ordered selection. Its palette-mapped light is darkened behind a large, crisp cover on the left and song/artist credits on the right, aligned around the vertical center. Soft cover and letter shadows keep the artwork and typography clear over the moving background. Titles use **Cormorant Garamond 600** and artist names use **Manrope 500**, both bundled under the [SIL Open Font License](./assets/fonts/README.md) so no font download is needed when rendering. The oscilloscope crosses the middle behind this group; the spectrum grows upward from the bottom edge, bounded to the lower 30% of the frame, with smoothly falling peak caps. The promo layout omits the sculpture and its orbiting effects.
+
+Default outputs are `<song>.promo.mp4` and `<song>.promo.clip.mp4`. Full HD 60 fps, H.264/AAC, synchronized entrance/end fades, explicit seeds, analysis reuse and the existing quality profiles work as usual. Promo's bottom analyzer intentionally reaches the frame edge; unlike the standard composition, it does not reserve the lower player-control margin. Set `visual.mode` to `"promo"` in JSON to save this layout with a project.
+
 ## MilkDrop engine
 
 Use `--engine milkdrop` to put actual MilkDrop-compatible visuals behind the Resonance sculpture. [Butterchurn](https://github.com/jberg/butterchurn) runs the preset equations, warped framebuffer feedback and blended transitions, giving the room rotating vortices, folded tunnels, flowing ribbons, particles and fractal motion. The existing textured sculpture, ghosts, fragments, embers, spectrum, oscilloscope and centered cover/title/artist group remain in front. The default `--engine resonance` stays available without a browser.
@@ -227,7 +248,7 @@ bun run clip -- ./song.mp3 --artist "Artist Name" --drop 92.5 --output ./renders
 bun run clip -- ./song.mp3 --artist "Artist Name" --duration 20 --lead-in 4 --fade-out 2
 ```
 
-Title and artist come from `--title` / `--artist`, then project text settings, then audio tags. A missing title falls back to the filename; if the artist is still missing, the command asks for `--artist` instead of exporting an uncredited clip. Both lines use the existing large, high-contrast typography.
+Title and artist come from `--title` / `--artist`, then project text settings, then audio tags. In standard mode, a missing title falls back to the filename; if the artist is still missing, the command asks for `--artist` instead of exporting an uncredited clip. Promo requires both credits without a filename fallback. Both layouts keep the song and artist readable.
 
 Default output is `<song>.clip.mp4`. Use `--overwrite` to replace an existing file. Clips always use 9:16; `--resolution`, `--fps`, `--render-scale`, `--quality`, `--seed`, `--image`, `--lighting`, `--config`, `--analysis` and `--save-analysis` remain available. The clip profile defaults to Full HD60 and `final` encoding even when the project config uses landscape dimensions or another frame rate. A reused analysis must match the selected frame rate and source file.
 
@@ -278,6 +299,7 @@ bun run render -- ./song.wav --config ./visu.config.json
     "artist": ""
   },
   "visual": {
+    "mode": "standard",
     "engine": "resonance",
     "seed": "auto",
     "imagePath": "",
@@ -292,7 +314,7 @@ bun run render -- ./song.wav --config ./visu.config.json
 }
 ```
 
-`visual.engine` selects `resonance` (the default) or `milkdrop`; `--engine` overrides it.
+`visual.mode` selects `standard` (the default) or `promo`; `--mode` overrides it. Promo requires artwork and both credits and always uses MilkDrop. In standard mode, `visual.engine` selects `resonance` (the default) or `milkdrop`; `--engine` overrides it.
 
 `visual.intensity` scales every light layer (bloom, filaments, hit rings, lift, embers). `bokehCount` is the number of embers, split between the far and the near plane. `grain` is the strength of a seeded luminance dither added before the vignette (at `0.03` at most two levels per pixel, enough to break banding on the upscaled cover); `0` disables it. `vignette` applies only without a cover, tinted in the palette's darkest swatch; the cover carries its own baked corner fade. `lowFlash` (default `true`) is the flash policy described above: it never caps geometry, halves light pulses and caps luminance transients at 0.5, ramps hit light in over 50 ms and keeps the per-hit lift under +0.05 mean luma, with hits rate-limited to one per 0.34 seconds by the plan in either mode.
 
@@ -386,6 +408,8 @@ bun run test:e2e
 ```
 
 The automated clip E2E generates a longer audio fixture with a known drop and passes a busy cover image through the public `clip --image` CLI. It checks a 30-second portrait MP4, the drop three seconds into the excerpt, all 1,800 frames at 60 fps, H.264/AAC encoding, matching audio/video duration, song and artist metadata, and decoded picture/audio fades. Both credit lines must remain visible beside the cover in a decoded 360-pixel-wide portrait preview. The test distinguishes the colorful thumbnail from text ink, checks the combined group is centered, and measures fades on the artist text independently. Output uses the default 1080×1920 delivery size with a quarter-scale internal render to limit test time. This verifies full-length clip selection and export; `bun run test:clip` is the shorter, six-second real-audio smoke render for visual inspection. Both require FFmpeg and FFprobe on `PATH`. Bare `bun test` discovers both suites, including the longer E2E.
+
+`bun run test:e2e:promo` checks required artwork and credits, automatic immersive preset selection, palette colors, text/cover placement, the bottom spectrum, audio sync and upload encoding through the real browser engine. It renders a short 640×360, 60 fps fixture; unit tests separately verify portrait and landscape layout bounds, silent readouts, smooth peak decay, seek stability and grayscale preservation. It requires Chrome/Chromium and FFmpeg.
 
 `bun run test:e2e:milkdrop` also requires Chrome/Chromium. It exercises the actual MilkDrop engine through a landscape render and a 30-second portrait clip, checking preset changes, frame motion, cover colors, readable credits, encoding and synchronized fades. A separate transport regression sends 600 native Full HD RGBA frames through the browser connection, checks their integrity and backpressure, and verifies startup errors and browser cleanup.
 

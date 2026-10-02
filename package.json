@@ -10,6 +10,7 @@
   "scripts": {
     "analyze": "bun src/cli.ts analyze",
     "render": "bun src/cli.ts render",
+    "render:promo": "bun src/cli.ts render --mode promo",
     "render:milkdrop": "bun src/cli.ts render --engine milkdrop",
     "clip:milkdrop": "bun src/cli.ts clip --engine milkdrop",
     "preview": "bun src/cli.ts render --duration 8 --quality preview",
@@ -18,6 +19,7 @@
     "showcase:loop": "bun src/cli.ts render test-e2e/loop.wav --output test-e2e/loop.mp4 --resolution fullhd --ratio 16:9 --fps 60 --quality final --seed loop-smoke --title \"RESONANCE\" --artist \"VISU VISU\" --fade 0.5 --overwrite",
     "test": "bun test ./test",
     "test:e2e": "bun test ./test-e2e",
+    "test:e2e:promo": "bun test ./test-e2e/promo.e2e.test.ts",
     "test:e2e:clip": "bun test ./test-e2e/clip.e2e.test.ts",
     "test:e2e:milkdrop": "bun test ./test-e2e/milkdrop.e2e.test.ts ./test-e2e/milkdrop-transport.e2e.test.ts",
     "typecheck": "tsc --noEmit",

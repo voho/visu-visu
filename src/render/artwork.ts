@@ -195,6 +195,7 @@ export async function prepareArtwork(
   imagePath: string | undefined,
   width: number,
   height: number,
+  thumbnailSize = 256,
 ): Promise<PreparedArtwork | undefined> {
   if (!imagePath?.trim()) return undefined;
   const path = resolveArtworkPath(imagePath);
@@ -232,7 +233,8 @@ export async function prepareArtwork(
   const palette = extractPalette(palettePixels);
   // Credits show a recognizable miniature of the source, independently of the
   // softened, darkened background and the object's lighting/normal maps.
-  const thumbnail = createCanvas(256, 256);
+  const sharpSize = Math.max(1, Math.min(1024, Math.round(thumbnailSize) || 256));
+  const thumbnail = createCanvas(sharpSize, sharpSize);
   const sourceSide = Math.min(source.width, source.height);
   thumbnail.getContext("2d").drawImage(
     source, (source.width - sourceSide) / 2, (source.height - sourceSide) / 2,

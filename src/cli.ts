@@ -15,6 +15,7 @@ import {
   parseSize,
   renderDimensions,
   resolveArtworkPath,
+  validatePromoRequirements,
 } from "./config.js";
 import { renderVideo, validateRenderAnalysis } from "./render/render.js";
 import { resolveFadeDurations } from "./render/encoder.js";
@@ -40,6 +41,7 @@ Render options:
       --fps <number>        Override frame rate (12–60, default: 60)
       --render-scale <n>    Internal resolution scale (0.25–1, final default: 1)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
+      --mode <name>         standard (default) or promo (requires cover/title/artist)
       --engine <name>       resonance (default) or milkdrop (requires Chrome)
       --milkdrop-presets <ids>  Comma-separated preset IDs, played in order
       --title <text>        On-screen and file metadata title
@@ -62,7 +64,7 @@ Clip options (portrait Full HD60, up to 30 seconds):
   -o, --output <file>       Output MP4 (default: <song>.clip.mp4)
       --title / --artist    Override audio tags; artist is required if untagged
   Also accepts --config, --analysis, --save-analysis, --resolution, --fps,
-  --render-scale, --seed, --engine, --milkdrop-presets, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
+  --render-scale, --seed, --mode, --engine, --milkdrop-presets, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
   Short sources use their available length. No clear drop: use sustained energy.
 
 Analyze options:
@@ -73,6 +75,7 @@ Analyze options:
 
 Examples:
   bun run render -- ./song.wav --title "Night Signal" --artist "Vojta"
+  bun run render:promo -- ./song.wav --image ./cover.png --title "Night Signal" --artist "Vojta"
   bun run preview -- ./song.mp3 --overwrite
   bun run clip -- ./song.mp3 --title "Night Signal" --artist "Vojta"
   bun run clip -- ./song.mp3 --artist "Vojta" --drop 92.5 --dry-run
@@ -114,6 +117,7 @@ export function overrideConfig(
     fps?: string;
     renderScale?: string;
     seed?: string;
+    mode?: string;
     engine?: string;
     milkdropPresets?: string;
     title?: string;
@@ -153,6 +157,12 @@ export function overrideConfig(
   const bands = numericOption(options.bands, "bands");
   if (bands !== undefined) mutable.visual.spectrumBands = bands;
   if (options.seed !== undefined) mutable.visual.seed = options.seed;
+  if (options.mode !== undefined) {
+    if (options.mode !== "standard" && options.mode !== "promo") {
+      throw new Error('--mode must be "standard" or "promo"');
+    }
+    mutable.visual.mode = options.mode;
+  }
   if (options.engine !== undefined) {
     if (options.engine !== "resonance" && options.engine !== "milkdrop") {
       throw new Error('--engine must be "resonance" or "milkdrop"');
@@ -240,6 +250,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       resolution: { type: "string" },
       "render-scale": { type: "string" },
       seed: { type: "string" },
+      mode: { type: "string" },
       engine: { type: "string" },
       "milkdrop-presets": { type: "string" },
       title: { type: "string" },
@@ -278,6 +289,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       ? {}
       : { renderScale: values["render-scale"] }),
     ...(values.seed === undefined ? {} : { seed: values.seed }),
+    ...(values.mode === undefined ? {} : { mode: values.mode }),
     ...(values.engine === undefined ? {} : { engine: values.engine }),
     ...(values["milkdrop-presets"] === undefined ? {} : { milkdropPresets: values["milkdrop-presets"] }),
     ...(values.title === undefined ? {} : { title: values.title }),
@@ -287,7 +299,9 @@ async function runRender(args: string[], clip = false): Promise<void> {
     ...(values.fade === undefined ? {} : { fade: values.fade }),
     ...(values.quality === undefined ? {} : { quality: values.quality }),
   });
-  const outputPath = resolve(values.output ?? defaultOutput(audioPath, clip ? ".clip.mp4" : ".visual.mp4"));
+  const outputSuffix = config.visual.mode === "promo"
+    ? (clip ? ".promo.clip.mp4" : ".promo.mp4") : (clip ? ".clip.mp4" : ".visual.mp4");
+  const outputPath = resolve(values.output ?? defaultOutput(audioPath, outputSuffix));
   let start = numericOption(values.start, "start") ?? 0;
   let duration = numericOption(values.duration, "duration");
   const leadIn = numericOption(values["lead-in"], "lead-in");
@@ -305,12 +319,14 @@ async function runRender(args: string[], clip = false): Promise<void> {
     }
   }
   await assertFfmpegAvailable();
-  if (clip && (!config.text.title || !config.text.artist)) {
+  const promo = config.visual.mode === "promo";
+  if ((clip || promo) && (!config.text.title || !config.text.artist)) {
     const metadata = await readAudioMetadata(audioPath);
     if (!config.text.title) config.text.title = metadata.title ?? "";
     if (!config.text.artist) config.text.artist = metadata.artist ?? "";
   }
-  if (!config.text.title) config.text.title = basename(audioPath, extname(audioPath));
+  if (!promo && !config.text.title) config.text.title = basename(audioPath, extname(audioPath));
+  validatePromoRequirements(config);
   if (clip && !config.text.artist) {
     throw new Error('No artist tag found. Add --artist "Artist Name" (or set text.artist in your config) so the clip includes a readable artist credit.');
   }
@@ -363,6 +379,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
         renderedDuration, fadeInSeconds, fadeOutSeconds,
         title: config.text.title, artist: config.text.artist,
         imagePath: config.visual.imagePath ?? "",
+        mode: config.visual.mode ?? "standard",
         engine: config.visual.engine ?? "resonance",
         milkdropPresets: config.visual.milkdropPresets ?? [],
       }, null, 2));
@@ -381,7 +398,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       ? "native"
       : `${internalSize.width}x${internalSize.height} internal`;
   log(
-    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · ${config.visual.engine === "milkdrop" ? "MilkDrop / Butterchurn" : "resonance conductor"}`,
+    `Render   ${promo ? "promo · " : ""}${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · ${config.visual.engine === "milkdrop" ? "MilkDrop / Butterchurn" : "resonance conductor"}`,
   );
   let lastPercent = -1;
   const result = await renderVideo(

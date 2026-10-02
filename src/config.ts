@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     artist: "",
   },
   visual: {
+    mode: "standard",
     engine: "resonance",
     milkdropPresets: [],
     imagePath: "",
@@ -125,6 +126,10 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
   if (width % 2 !== 0 || height % 2 !== 0) {
     throw new Error("output.width and output.height must be even for H.264 encoding");
   }
+  const mode = stringValue(visual.mode, "standard", "visual.mode");
+  if (mode !== "standard" && mode !== "promo") {
+    throw new Error('visual.mode / --mode must be "standard" or "promo"');
+  }
   const imagePath = stringValue(visual.imagePath, "", "visual.imagePath").trim();
   const engine = stringValue(visual.engine, "resonance", "visual.engine");
   if (engine !== "resonance" && engine !== "milkdrop") {
@@ -181,7 +186,8 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       artist: stringValue(text.artist, DEFAULT_CONFIG.text.artist, "text.artist").trim(),
     },
     visual: {
-      engine,
+      mode,
+      engine: mode === "promo" ? "milkdrop" : engine,
       milkdropPresets: selectedPresets,
       imagePath,
       lighting: boundedNumber(visual.lighting, DEFAULT_CONFIG.visual.lighting ?? 0.65, "visual.lighting", 0, 1),
@@ -218,6 +224,16 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       lowFlash: booleanValue(visual.lowFlash, DEFAULT_CONFIG.visual.lowFlash, "visual.lowFlash"),
     },
   };
+}
+
+/** Check after CLI overrides and audio tags, and again at the public rendering boundary. */
+export function validatePromoRequirements(config: ProjectConfig): void {
+  if (config.visual.mode !== "promo") return;
+  const missing: string[] = [];
+  if (!config.visual.imagePath?.trim()) missing.push('--image (visual.imagePath)');
+  if (!config.text.title.trim()) missing.push('--title (text.title or an audio title tag)');
+  if (!config.text.artist.trim()) missing.push('--artist (text.artist or an audio artist tag)');
+  if (missing.length) throw new Error(`Promo mode requires ${missing.join(", ")}.`);
 }
 
 export async function loadProjectConfig(configPath?: string): Promise<ProjectConfig> {

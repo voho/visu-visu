@@ -7,6 +7,7 @@ import type { PreparedArtwork } from "../render/artwork.js";
 import type { RenderProgress, RenderResult } from "../render/render.js";
 import { FfmpegEncoder } from "../render/encoder.js";
 import { VisualizerRenderer } from "../render/renderer.js";
+import { PromoRenderer, createPromoLayout } from "../render/promo.js";
 import { createSafeLayout, creditLockupEllipse } from "../render/layout.js";
 import { randomPalette } from "../render/palette.js";
 import { deriveMusicMotion } from "../render/music-motion.js";
@@ -63,7 +64,10 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
   const executablePath = milkdropBrowserPath();
   const { duration, totalFrames, seed, renderSize, artwork } = prepared;
   const { width, height } = renderSize, fps = request.config.output.fps;
-  const selected = request.config.visual.milkdropPresets ?? [];
+  const promo = request.config.visual.mode === "promo";
+  if (promo && !artwork?.thumbnail) throw new Error("Promo mode requires a cover image.");
+  const customPresets = request.config.visual.milkdropPresets ?? [];
+  const selected = customPresets.length ? customPresets : promo ? ["tunnel-race", "mandelbox-explorer"] : [];
   const plan = planMilkdrop(analysis, seed, request.start, totalFrames, fps,
     selected.length ? selected : [...MILKDROP_DEFAULT_PRESET_IDS], selected.length > 0);
   const build = await Bun.build({ entrypoints: [resolve(import.meta.dir, "browser.js")], target: "browser", minify: true });
@@ -72,10 +76,12 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
     decodeStereo(request.audioPath, plan.simulationStart, plan.simulationFrames / fps)]);
   if (pcm.length === 0 || pcm.length % 8 !== 0) throw new Error("MilkDrop received incomplete stereo PCM");
   const palette = artwork?.palette ?? randomPalette(seed);
-  const renderer = new VisualizerRenderer(request.config, seed, renderSize, artwork);
+  const renderer = promo ? new PromoRenderer(request.config, renderSize, artwork!)
+    : new VisualizerRenderer(request.config, seed, renderSize, artwork);
   const background = createCanvas(width, height), backgroundContext = background.getContext("2d");
-  const cover = artwork?.canvas.toBuffer("image/png");
+  const cover = promo ? undefined : artwork?.canvas.toBuffer("image/png");
   const layout = createSafeLayout(width, height), ellipse = creditLockupEllipse(layout, width, height);
+  const promoLayout = createPromoLayout(width, height);
   const features = Array.from({ length: plan.simulationFrames }, (_, frame) => {
     const time = plan.simulationStart + frame / fps;
     const motion = deriveMusicMotion(analysis, time), dynamics = deriveSceneDynamics(analysis, time);
@@ -126,9 +132,13 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
     browser = await launchMilkdropChrome(executablePath, `${origin}${prefix}/index.html`);
     const job = { base: origin + prefix, width, height, fps, seed, start: request.start, totalFrames,
       sourceDuration: analysis.duration, ...plan, sampleRate: 44100, palette: palette.colors,
-      lowFlash: request.config.visual.lowFlash, hasArtwork: Boolean(artwork), intensity: request.config.visual.intensity,
-      credit: { cx: ellipse.x, cy: ellipse.y, rx: ellipse.rx, ry: ellipse.ry }, features };
-    Object.assign(job, { hero: { cx: layout.centerX / width, cy: layout.horizon / height,
+      lowFlash: request.config.visual.lowFlash, hasArtwork: Boolean(cover), intensity: request.config.visual.intensity,
+      credit: promo ? { cx: (promoLayout.text.x + promoLayout.text.width / 2) / width, cy: 0.5, rx: 0.30, ry: 0.14 }
+        : { cx: ellipse.x, cy: ellipse.y, rx: ellipse.rx, ry: ellipse.ry }, features };
+    Object.assign(job, { hero: promo ? {
+      cx: (promoLayout.cover.x + promoLayout.cover.size / 2) / width, cy: 0.5,
+      rx: promoLayout.cover.size / width * 0.6, ry: promoLayout.cover.size / height * 0.6,
+    } : { cx: layout.centerX / width, cy: layout.horizon / height,
       rx: layout.width / width * 0.48, ry: (layout.graphBottom - layout.graphTop) / height * 0.45 } });
     await browser.evaluate(`window.milkdrop.init(${JSON.stringify(job)})`);
     // GPU initialization and input validation finish before opening the output.

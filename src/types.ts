@@ -19,6 +19,8 @@ export interface TextConfig {
 }
 
 export interface VisualConfig {
+  /** Standard sculpture composition or an artwork-led promotional layout. */
+  mode?: "standard" | "promo";
   /** Resonance sculpture or the sequential MilkDrop-compatible WebGL engine. */
   engine?: "resonance" | "milkdrop";
   /** Ordered MilkDrop playlist; empty uses the automatic preset selection. */

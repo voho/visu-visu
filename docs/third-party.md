@@ -1,5 +1,7 @@
 # Third-party visualization components
 
+Promo typography bundles [Cormorant Garamond](https://github.com/google/fonts/tree/main/ofl/cormorantgaramond) and [Manrope](https://github.com/google/fonts/tree/main/ofl/manrope) under the SIL Open Font License 1.1. The unmodified fonts, their full license notices and provenance are in [assets/fonts](../assets/fonts/README.md). Fonts are loaded locally; rendering does not contact a font service.
+
 The optional MilkDrop engine uses [Butterchurn](https://github.com/jberg/butterchurn), a WebGL implementation of the MilkDrop visualizer, and selected presets from [butterchurn-presets](https://github.com/jberg/butterchurn-presets). The pinned packages are **butterchurn 2.6.7** and **butterchurn-presets 2.4.7**. Their published package metadata and repositories identify both as MIT licensed: [engine license](https://github.com/jberg/butterchurn/blob/master/LICENSE), [preset collection license](https://github.com/jberg/butterchurn-presets/blob/master/LICENSE). Preset display names retain their original creator credits in the catalogue.
 
 This is a MilkDrop 2-compatible rendering path. It does not run the Windows MilkDrop3 application or promise support for MilkDrop3's double-preset format, newer extensions or private shaders. MilkDrop3 remains a separate project; its [README](https://github.com/milkdrop2077/MilkDrop3#readme) describes those additional features.
