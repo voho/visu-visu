@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { once } from "node:events";
+import type { Writable } from "node:stream";
 import type { ProjectConfig } from "../types.js";
 
 export const DELIVERY_AUDIO_BITRATE = 384_000;
@@ -228,16 +228,35 @@ export class FfmpegEncoder {
     }
     try {
       if (!input.write(frame)) {
-        const result = await Promise.race([
-          once(input, "drain").then(() => "drain" as const),
-          this.exitPromise.then(() => "exit" as const),
-        ]);
-        if (result === "exit") await this.throwInputError("FFmpeg closed its input early");
+        await this.waitForDrain(input);
       }
       if (this.inputError) await this.throwInputError("FFmpeg rejected frame input");
     } catch {
       await this.throwInputError("FFmpeg rejected frame input");
     }
+  }
+
+  private waitForDrain(input: Writable): Promise<void> {
+    // A race against the lifetime exit promise leaves one pending reaction per
+    // frame. Keep only the current write's listeners, including on failures.
+    return new Promise((resolvePromise, reject) => {
+      const cleanup = () => {
+        input.off("drain", drained);
+        input.off("error", failed);
+        input.off("close", closed);
+        this.child.off("close", closed);
+      };
+      const drained = () => { cleanup(); resolvePromise(); };
+      const failed = (error: Error) => { cleanup(); reject(error); };
+      const closed = () => failed(new Error("FFmpeg closed its input early"));
+      input.once("drain", drained);
+      input.once("error", failed);
+      input.once("close", closed);
+      this.child.once("close", closed);
+      if (this.inputError) failed(this.inputError);
+      else if (input.destroyed || this.child.exitCode !== null || this.child.signalCode !== null) closed();
+      else if (!input.writableNeedDrain) drained();
+    });
   }
 
   async finish(): Promise<void> {
