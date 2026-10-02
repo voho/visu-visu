@@ -84,6 +84,9 @@ export async function launchMilkdropChrome(executablePath: string, url: string):
       } finally {
         fail(new Error("MilkDrop Chrome connection is closed"));
         socket?.close();
+        // Crash reporters/updaters may inherit stderr and outlive Chrome.
+        // Release our read end so those descendants cannot hold the CLI open.
+        child.stderr.destroy();
         await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     })();

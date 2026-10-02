@@ -1,10 +1,66 @@
 import { describe, expect, test } from "bun:test";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchMilkdropChrome, type MilkdropChrome } from "../src/milkdrop/chrome.js";
 import { milkdropBrowserPath } from "../src/milkdrop/export.js";
 
 describe("MilkDrop Full HD frame transport", () => {
+  test("exits naturally after browser cleanup when a descendant retains stderr", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "visu-chrome-lifecycle-"));
+    const executable = join(directory, "fake-chrome"), helperPidPath = join(directory, "helper.pid");
+    const probe = join(directory, "probe.ts");
+    // Chrome's crash reporter can outlive its main process while retaining the
+    // stderr write end. This short-lived helper reproduces that inheritance
+    // without launching or signalling any real browser, updater or reporter.
+    await writeFile(executable, `#!${process.execPath}
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+  detached: true, stdio: ["ignore", "ignore", "inherit"],
+});
+writeFileSync(${JSON.stringify(helperPidPath)}, String(helper.pid));
+helper.unref();
+process.exit(17);
+`);
+    await chmod(executable, 0o700);
+    await writeFile(probe, `import { launchMilkdropChrome } from ${JSON.stringify(new URL("../src/milkdrop/chrome.ts", import.meta.url).href)};
+try {
+  await launchMilkdropChrome(${JSON.stringify(executable)}, "about:blank");
+  throw new Error("Unexpected successful startup");
+} catch (error) {
+  if (!String(error).includes("MilkDrop Chrome exited (17)")) throw error;
+  console.log("browser cleanup complete");
+}
+// No process.exit(): every transport handle must actually be released.
+`);
+    const child = Bun.spawn([process.execPath, probe], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const code = await Promise.race([child.exited, new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Browser cleanup kept the process alive on inherited stderr")), 4000);
+      })]);
+      clearTimeout(timeout);
+      expect(code).toBe(0);
+      expect(await new Response(child.stdout).text()).toContain("browser cleanup complete");
+      expect(await new Response(child.stderr).text()).toBe("");
+      const helperPid = Number(await readFile(helperPidPath, "utf8"));
+      expect(Number.isSafeInteger(helperPid) && helperPid > 0).toBe(true);
+      // Prove that natural exit did not merely wait for the descendant to die.
+      expect(() => process.kill(helperPid, 0)).not.toThrow();
+    } finally {
+      clearTimeout(timeout);
+      if (child.exitCode === null) child.kill();
+      await child.exited;
+      try {
+        const helperPid = Number(await readFile(helperPidPath, "utf8"));
+        if (Number.isSafeInteger(helperPid) && helperPid > 0) process.kill(helperPid, "SIGTERM");
+      } catch (error) {
+        if (!["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      } finally { await rm(directory, { recursive: true, force: true }); }
+    }
+  }, 15_000);
+
   test("acknowledges 600 complete RGBA frames without instrumenting their network payloads", async () => {
     // Quarter-scale render tests cannot reproduce the former Chrome crash:
     // network inspection duplicated each 8 MB upload into large CDP events.
