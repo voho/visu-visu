@@ -29,61 +29,43 @@ export async function hashFile(path: string): Promise<string> {
   });
 }
 
+async function decodePcm(absolutePath: string, channels: number): Promise<Buffer> {
+  return await new Promise<Buffer>((accept, reject) => {
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", absolutePath,
+      "-vn", "-ac", String(channels), "-ar", String(ANALYSIS_SAMPLE_RATE),
+      "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-8192); });
+    child.once("error", reject);
+    child.once("close", code => code === 0 ? accept(Buffer.concat(chunks))
+      : reject(new Error(`FFmpeg could not decode the audio${stderr.trim() ? `: ${stderr.trim()}` : ""}`)));
+  });
+}
+
 export async function decodeAudio(audioPath: string): Promise<AudioPcm> {
   const absolutePath = resolve(audioPath);
   await access(absolutePath);
-
-  const chunks: Buffer[] = [];
-  let stderr = "";
-  const sourceFileHashPromise = hashFile(absolutePath);
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-i",
-    absolutePath,
-    "-vn",
-    "-ac",
-    "1",
-    "-ar",
-    String(ANALYSIS_SAMPLE_RATE),
-    "-f",
-    "f32le",
-    "-acodec",
-    "pcm_f32le",
-    "pipe:1",
-  ];
-
-  const decodePromise = new Promise<void>((resolvePromise, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) resolvePromise();
-      else reject(new Error(`FFmpeg could not decode the audio${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
-    });
-  });
-  const [, sourceFileHash] = await Promise.all([decodePromise, sourceFileHashPromise]);
-
-  const pcmBuffer = Buffer.concat(chunks);
-  const alignedBytes = pcmBuffer.byteLength - (pcmBuffer.byteLength % 4);
-  if (alignedBytes === 0) throw new Error("The input did not contain a decodable audio stream");
-  const copied = pcmBuffer.buffer.slice(
-    pcmBuffer.byteOffset,
-    pcmBuffer.byteOffset + alignedBytes,
-  );
-  const samples = new Float32Array(copied);
-  const sourceHash = createHash("sha256").update(pcmBuffer.subarray(0, alignedBytes)).digest("hex");
-
+  // Keep the established mono decode byte-for-byte: source hashes, preset
+  // choices and foreground motion must not depend on adding a stereo readout.
+  const [mono, stereo, sourceFileHash] = await Promise.all([
+    decodePcm(absolutePath, 1), decodePcm(absolutePath, 2), hashFile(absolutePath),
+  ]);
+  if (!mono.length || mono.length % 4 || stereo.length !== mono.length * 2) {
+    throw new Error("The input did not contain complete mono and stereo audio streams");
+  }
+  const samples = new Float32Array(mono.buffer.slice(mono.byteOffset, mono.byteOffset + mono.byteLength));
+  const interleaved = new Float32Array(stereo.buffer.slice(stereo.byteOffset, stereo.byteOffset + stereo.byteLength));
+  const left = new Float32Array(samples.length), right = new Float32Array(samples.length);
+  for (let index = 0; index < samples.length; index++) {
+    left[index] = interleaved[index * 2]!;
+    right[index] = interleaved[index * 2 + 1]!;
+  }
   return {
-    samples,
-    sampleRate: ANALYSIS_SAMPLE_RATE,
+    samples, channels: { left, right }, sampleRate: ANALYSIS_SAMPLE_RATE,
     duration: samples.length / ANALYSIS_SAMPLE_RATE,
-    sourceHash,
-    sourceFileHash,
+    sourceHash: createHash("sha256").update(mono).digest("hex"), sourceFileHash,
   };
 }

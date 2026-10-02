@@ -60,4 +60,26 @@ describe("analysis cache", () => {
     await saveAnalysis(invalidPath, { ...analysis, version: ANALYSIS_VERSION - 1 });
     expect(loadAnalysis(invalidPath)).rejects.toThrow("is not supported");
   });
+
+  test("round-trips distinct stereo arrays and rejects incomplete or invalid channels", async () => {
+    const stereo: AudioAnalysis = { ...analysis, frames: analysis.frames.map(frame => ({ ...frame,
+      spectrumLeft: new Float32Array(16).fill(0.8), spectrumRight: new Float32Array(16).fill(0.2) })) };
+    await saveAnalysis(validPath, stereo);
+    const loaded = await loadAnalysis(validPath);
+    expect(loaded).toEqual(stereo);
+    expect(loaded.frames[0]!.spectrumLeft).toBeInstanceOf(Float32Array);
+    expect(loaded.frames[0]!.spectrumRight).toBeInstanceOf(Float32Array);
+    for (const change of [
+      { spectrumRight: undefined }, { spectrumLeft: [0.1] }, { spectrumRight: new Array(16).fill(1.1) },
+      { spectrumLeft: new Array(16).fill(null) },
+    ]) {
+      await writeFile(invalidPath, JSON.stringify({ ...stereo, frames: [{ ...loaded.frames[0],
+        spectrum: Array.from(loaded.frames[0]!.spectrum), spectrumLeft: new Array(16).fill(0.8),
+        spectrumRight: new Array(16).fill(0.2), waveform: Array.from(loaded.frames[0]!.waveform), ...change }] }));
+      await expect(loadAnalysis(invalidPath)).rejects.toThrow();
+    }
+    await saveAnalysis(invalidPath, { ...stereo, duration: 2 / stereo.fps,
+      frames: [stereo.frames[0]!, analysis.frames[0]!] });
+    await expect(loadAnalysis(invalidPath)).rejects.toThrow("both channels on every frame");
+  });
 });

@@ -4,6 +4,7 @@ import { parseProjectConfig } from "../src/config.js";
 import type { PreparedArtwork } from "../src/render/artwork.js";
 import { extractPalette } from "../src/render/palette.js";
 import { createPromoLayout, PromoRenderer, promoSignalsAt } from "../src/render/promo.js";
+import { spectrumReadoutAt } from "../src/render/spectrum-readout.js";
 import { ANALYSIS_VERSION, type AudioAnalysis } from "../src/types.js";
 
 function track(sample: (index: number, band: number) => number, waveform = false): AudioAnalysis {
@@ -40,6 +41,32 @@ function composition(width = 640, height = 360, text = { title: "Night Signal", 
 }
 
 describe("promo composition", () => {
+  test("overlays distinct stereo bars with exactly one falling maximum cap per frequency", () => {
+    const analysis = track(() => 0);
+    for (const [index, frame] of analysis.frames.entries()) {
+      frame.spectrumLeft = Float32Array.from({ length: 64 }, (_, band) =>
+        index === 60 && band === 17 ? 0.12 : 0);
+      frame.spectrumRight = Float32Array.from({ length: 64 }, (_, band) =>
+        index === 90 && (band === 17 || band === 43) ? 0.08 : 0);
+    }
+    for (const time of [1.02, 1.45, 1.52, 1.85, 2.2, 4.5]) {
+      const signals = promoSignalsAt(analysis, time, 1920, 1080);
+      const left = spectrumReadoutAt(analysis, time, "promo", "left");
+      const right = spectrumReadoutAt(analysis, time, "promo", "right");
+      expect(signals.spectra.map(bars => bars.length)).toEqual([64, 64]);
+      expect(signals.bars).toHaveLength(64);
+      for (let band = 0; band < 64; band++) {
+        expect(signals.spectra[0][band]!.level).toBe(left.levels[band]!);
+        expect(signals.spectra[1][band]!.level).toBe(right.levels[band]!);
+        expect(signals.bars[band]!.peakLevel).toBe(Math.max(left.peaks[band]!, right.peaks[band]!));
+      }
+    }
+    const state = promoSignalsAt(analysis, 1.52, 1920, 1080);
+    expect(state.spectra[1][43]!.height).toBeGreaterThan(0);
+    expect(state.spectra[0][43]!.height).toBe(0);
+    expect(state.bars[17]!.peakLevel).toBeGreaterThan(state.spectra[1][17]!.level);
+  });
+
   test("centers the complete airy group with golden columns and a separate 68% waveform", () => {
     for (const [width, height] of [[1920, 1080], [1080, 1920], [1080, 1080], [640, 360], [160, 640], [640, 160]]) {
       const layout = createPromoLayout(width!, height!);
@@ -69,7 +96,7 @@ describe("promo composition", () => {
       expect(layout.spectrumBaseline).toBe(height! * 0.94);
       const signals = promoSignalsAt(track(() => 1), 2, width!, height!);
       expect(signals.bars).toHaveLength(64);
-      for (const bar of signals.bars) {
+      for (const bar of [...signals.bars, ...signals.spectra.flat()]) {
         expect(bar.x).toBeGreaterThanOrEqual(width! * 0.08);
         expect(bar.x + bar.width).toBeLessThanOrEqual(width! * 0.92 + 1e-8);
         expect(bar.y).toBeGreaterThanOrEqual(layout.spectrumTop);

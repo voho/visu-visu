@@ -1,4 +1,4 @@
-import type { AudioAnalysis } from "../types.js";
+import type { AnalysisFrame, AudioAnalysis } from "../types.js";
 
 /** The readout keeps all 64 FFT bands; the sculpture retains its 32 material bands. */
 export const SPECTRUM_STRIP_BANDS = 64;
@@ -11,6 +11,7 @@ const CEILING_FLOOR = 0.12;
 const unit = (value: number): number => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 
 export type SpectrumReadoutProfile = "standard" | "promo";
+export type SpectrumChannel = "mono" | "left" | "right";
 
 interface ReadoutTiming {
   attack: number;
@@ -40,7 +41,14 @@ interface ReadoutData {
   peaks: Float64Array;
   heldUntil: Float64Array;
 }
-const profiles = new WeakMap<AudioAnalysis, Partial<Record<SpectrumReadoutProfile, ReadoutData>>>();
+type ReadoutKey = `${SpectrumReadoutProfile}:${SpectrumChannel}`;
+const profiles = new WeakMap<AudioAnalysis, Partial<Record<ReadoutKey, ReadoutData>>>();
+const stereoCeilings = new WeakMap<AudioAnalysis, Float64Array>();
+
+function frameSpectrum(frame: AnalysisFrame, channel: SpectrumChannel): Float32Array {
+  return channel === "left" ? frame.spectrumLeft ?? frame.spectrum
+    : channel === "right" ? frame.spectrumRight ?? frame.spectrum : frame.spectrum;
+}
 
 /** Area sampling retains independent source bins and supports older, lower-resolution analyses. */
 function sourceBands(source: Float32Array): Float64Array {
@@ -74,7 +82,7 @@ function fallenPeak(peak: number, heldUntil: number, time: number, timing: Reado
   return Math.max(0, peak - Math.max(0, time - heldUntil) * timing.peakFall);
 }
 
-function build(analysis: AudioAnalysis, timing: ReadoutTiming): ReadoutData {
+function build(analysis: AudioAnalysis, timing: ReadoutTiming, channel: SpectrumChannel): ReadoutData {
   const fps = Number.isFinite(analysis.fps) && analysis.fps > 0 ? analysis.fps : 30;
   const count = analysis.frames.length;
   const targets = new Float64Array(count * SPECTRUM_STRIP_BANDS);
@@ -82,16 +90,25 @@ function build(analysis: AudioAnalysis, timing: ReadoutTiming): ReadoutData {
   const smoothed = new Float64Array(targets.length);
   const peaks = new Float64Array(targets.length);
   const heldUntil = new Float64Array(targets.length);
-  const ceilings = new Float64Array(SPECTRUM_STRIP_BANDS).fill(CEILING_FLOOR);
-  for (let index = 0; index < count; index++) targets.set(sourceBands(analysis.frames[index]!.spectrum), index * SPECTRUM_STRIP_BANDS);
-  if (count > 0) {
-    const column = new Float64Array(count);
+  const shared = channel === "mono" ? undefined : stereoCeilings.get(analysis);
+  const ceilings = shared ?? new Float64Array(SPECTRUM_STRIP_BANDS).fill(CEILING_FLOOR);
+  for (let index = 0; index < count; index++) targets.set(sourceBands(frameSpectrum(analysis.frames[index]!, channel)), index * SPECTRUM_STRIP_BANDS);
+  if (count > 0 && !shared) {
+    const other = channel === "mono" ? undefined : new Float64Array(targets.length);
+    if (other) for (let index = 0; index < count; index++) {
+      other.set(sourceBands(frameSpectrum(analysis.frames[index]!, channel === "left" ? "right" : "left")), index * SPECTRUM_STRIP_BANDS);
+    }
+    const column = new Float64Array(count * (other ? 2 : 1));
     for (let band = 0; band < SPECTRUM_STRIP_BANDS; band++) {
-      for (let index = 0; index < count; index++) column[index] = targets[index * SPECTRUM_STRIP_BANDS + band]!;
+      for (let index = 0; index < count; index++) {
+        column[index] = targets[index * SPECTRUM_STRIP_BANDS + band]!;
+        if (other) column[count + index] = other[index * SPECTRUM_STRIP_BANDS + band]!;
+      }
       column.sort();
-      ceilings[band] = Math.max(CEILING_FLOOR, column[Math.min(count - 1, Math.floor(count * CEILING_PERCENTILE))]!);
+      ceilings[band] = Math.max(CEILING_FLOOR, column[Math.min(column.length - 1, Math.floor(column.length * CEILING_PERCENTILE))]!);
     }
   }
+  if (channel !== "mono" && !shared) stereoCeilings.set(analysis, ceilings);
   for (let index = 0; index < count; index++) {
     const time = index / fps;
     for (let band = 0; band < SPECTRUM_STRIP_BANDS; band++) {
@@ -119,12 +136,14 @@ function build(analysis: AudioAnalysis, timing: ReadoutTiming): ReadoutData {
 }
 
 /** Causal envelopes and peak hold, indexed by absolute time rather than render history. */
-export function spectrumReadoutAt(analysis: AudioAnalysis, time: number, kind: SpectrumReadoutProfile = "standard"): { levels: Float32Array; peaks: Float32Array } {
+export function spectrumReadoutAt(analysis: AudioAnalysis, time: number, kind: SpectrumReadoutProfile = "standard",
+  channel: SpectrumChannel = "mono"): { levels: Float32Array; peaks: Float32Array } {
   const timing = timings[kind];
   let cached = profiles.get(analysis);
   if (!cached) { cached = {}; profiles.set(analysis, cached); }
-  let profile = cached[kind];
-  if (!profile) { profile = build(analysis, timing); cached[kind] = profile; }
+  const key: ReadoutKey = `${kind}:${channel}`;
+  let profile = cached[key];
+  if (!profile) { profile = build(analysis, timing, channel); cached[key] = profile; }
   const levels = new Float32Array(SPECTRUM_STRIP_BANDS);
   const peaks = new Float32Array(SPECTRUM_STRIP_BANDS);
   if (!profile.count) return { levels, peaks };

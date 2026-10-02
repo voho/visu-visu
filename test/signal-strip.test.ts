@@ -70,7 +70,7 @@ describe("signal band: spectrum strip and floor oscilloscope", () => {
       const band = signalBand(layout, height);
       const frame = signalBandAt(loud, 4, layout, height, { kick: 1, section: 1, treblePulse: 1 });
       const floor = layout.graphBottom + height * 0.01, ceiling = height * 0.80;
-      for (const bar of frame.bars) {
+      for (const bar of [...frame.bars, ...frame.spectra.flat()]) {
         expect(bar.x).toBeGreaterThanOrEqual(layout.left);
         expect(bar.x + bar.width).toBeLessThanOrEqual(layout.right + 1e-9);
         expect(bar.y).toBeGreaterThanOrEqual(floor);
@@ -132,5 +132,29 @@ describe("signal band: spectrum strip and floor oscilloscope", () => {
       for (let i = graphEnd + 3; i < pixels.length; i += 4) lit += Number(pixels[i]! > 0);
       expect(lit).toBeGreaterThan(width * 4);
     }
+  });
+
+  test("composites two half-opacity layers and retains one maximum peak per band", () => {
+    const analysis = source(() => ({}));
+    for (const frame of analysis.frames) {
+      frame.spectrumLeft = new Float32Array(64).fill(0.8);
+      frame.spectrumRight = new Float32Array(64).fill(0.2);
+    }
+    const layout = createSafeLayout(640, 360);
+    const frame = signalBandAt(analysis, 2, layout, 360, drive);
+    expect(frame.spectra.map(bars => bars.length)).toEqual([64, 64]);
+    expect(frame.peaks).toHaveLength(64);
+    expect(frame.spectra[0][0]!.height).toBeGreaterThan(frame.spectra[1][0]!.height * 2);
+    expect(frame.peaks[0]!.y).toBeLessThan(frame.spectra[0][0]!.y);
+    const bar = { band: 17, x: 40, y: 40, width: 20, height: 40 };
+    const canvas = createCanvas(100, 100), context = canvas.getContext("2d");
+    const alpha = (right: boolean) => {
+      context.clearRect(0, 0, 100, 100);
+      drawSignalBand(context, { ...frame, spectra: [[bar], right ? [bar] : []], peaks: [], traces: [] }, style, true);
+      return context.getImageData(50, 60, 1, 1).data[3]!;
+    };
+    const single = alpha(false);
+    expect(Math.abs(single - 255 * 0.6 * 0.5)).toBeLessThanOrEqual(1);
+    expect(Math.abs(alpha(true) - (2 * single - single ** 2 / 255))).toBeLessThanOrEqual(1);
   });
 });

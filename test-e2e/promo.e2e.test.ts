@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { MILKDROP_PRESETS } from "../src/milkdrop/presets.js";
+import { loadAnalysis } from "../src/audio/cache.js";
 
 const execute = promisify(execFile);
 const cli = resolve(import.meta.dir, "../src/cli.ts");
@@ -43,7 +44,7 @@ beforeAll(async () => {
   context.fillRect(60, 180, 180, 60);
   await Bun.write(imagePath, canvas.toBuffer("image/png"));
   await command("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i",
-    "aevalsrc='(0.55*sin(2*PI*60*t)+0.22*sin(2*PI*440*t)+0.12*sin(2*PI*2500*t)+0.07*sin(2*PI*7300*t))*if(lt(t,8.5),0.1,0.8)':s=24000:d=12",
+    "aevalsrc='(0.55*sin(2*PI*60*t)+0.22*sin(2*PI*440*t))*if(lt(t,8.5),0.1,0.8)|(0.55*sin(2*PI*60*t)+0.12*sin(2*PI*2500*t)+0.07*sin(2*PI*7300*t))*if(lt(t,8.5),0.1,0.8)':s=24000:d=12:c=stereo",
     "-map_metadata", "-1", "-c:a", "pcm_s16le", audioPath]);
 }, 30_000);
 
@@ -115,12 +116,20 @@ describe("promo mode end to end", () => {
 
   test("renders the centered Airy composition with aligned cover and credits, live MilkDrop and a reserved spectrum band", async () => {
     const output = join(directory, "promo.mp4");
+    const analysisPath = join(directory, "stereo.analysis.json");
     // This deliberately omits --engine and --milkdrop-presets: promo must select
     // the real immersive engine itself. No user media or browser mocks are used.
     const result = await command(process.execPath, [cli, "render", audioPath,
       "--mode", "promo", "--image", imagePath, "--title", "NIGHT SIGNAL", "--artist", "VOHO",
       "--output", output, "--size", `${width}x${height}`, "--fps", String(fps), "--start", "7",
-      "--duration", String(duration), "--fade", "0", "--seed", "promo-e2e"], 300_000);
+      "--duration", String(duration), "--fade", "0", "--seed", "promo-e2e",
+      "--save-analysis", analysisPath], 300_000);
+    const analysis = await loadAnalysis(analysisPath);
+    const signals = analysis.frames[9 * fps]!;
+    const mids = Math.floor(Math.log(440 / 32) / Math.log(11760 / 32) * 64);
+    const highs = Math.floor(Math.log(2500 / 32) / Math.log(11760 / 32) * 64);
+    expect(signals.spectrumLeft![mids]!).toBeGreaterThan(signals.spectrumRight![mids]! * 10);
+    expect(signals.spectrumRight![highs]!).toBeGreaterThan(signals.spectrumLeft![highs]! * 10);
     const log = result.stdout + result.stderr;
     expect(log).toMatch(/milkdrop/i);
     const schedules = log.split(/\r?\n/).filter(line => line.startsWith("MilkDrop "));

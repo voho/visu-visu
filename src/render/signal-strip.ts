@@ -36,7 +36,9 @@ export interface ScopeTrace {
 }
 export interface SignalBandFrame {
   bars: StripBar[];
-  /** Held spectral maxima, falling slowly after a hit. */
+  /** Left and right spectra, composited at half opacity. */
+  spectra: [StripBar[], StripBar[]];
+  /** One held maximum of both channels per band, falling slowly after a hit. */
   peaks: StripPeak[];
   /** The per-band levels behind the bars, on the track's own scale; the embers pulse with them. */
   levels: Float32Array;
@@ -123,17 +125,24 @@ export function signalBandAt(analysis: AudioAnalysis, time: number, layout: Safe
   const scale = height / 1080;
   const sectionGain = 0.6 + 0.4 * unit(drive.section);
   const field = audioFieldAt(analysis, time);
-  const readout = spectrumReadoutAt(analysis, time);
-  const levels = kickBands(readout.levels, drive.kick);
-  const bars = spectrumStripGeometry(layout, height, levels, sectionGain);
+  const levels = normalizedBandsAt(analysis, time, drive.kick);
+  const left = spectrumReadoutAt(analysis, time, "standard", "left");
+  const right = spectrumReadoutAt(analysis, time, "standard", "right");
+  const sharedLevels = Float32Array.from(left.levels, (value, index) => Math.max(value, right.levels[index]!));
+  const bars = spectrumStripGeometry(layout, height, sharedLevels, sectionGain);
+  const pitch = layout.width / SPECTRUM_STRIP_BANDS;
+  const spectra = [left, right].map((channel, side) =>
+    spectrumStripGeometry(layout, height, channel.levels, sectionGain).map(bar => ({
+      ...bar, x: bar.x + (side ? 1 : -1) * pitch * 0.10,
+    }))) as SignalBandFrame["spectra"];
   const band = signalBand(layout, height);
   const peakHeight = 2.2 * scale;
-  const peakLevels = readout.peaks;
+  const peakLevels = Float32Array.from(left.peaks, (value, index) => Math.max(value, right.peaks[index]!));
   const peakBars = spectrumStripGeometry(layout, height, peakLevels, sectionGain);
   const peaks = peakBars.map((peak, index): StripPeak => ({
     band: index, x: peak.x, y: Math.min(peak.y, bars[index]!.y) - peakHeight,
     width: peak.width, height: peakHeight,
-    alpha: unit(Math.max(peakLevels[index]!, levels[index]!) / 0.04),
+    alpha: unit(Math.max(peakLevels[index]!, sharedLevels[index]!) / 0.04),
   }));
   const lineWidth = (2.4 + field.fast * 1.2) * scale;
   // Reserve a real gap between the widest glow stroke and full-height peak caps.
@@ -149,7 +158,7 @@ export function signalBandAt(analysis: AudioAnalysis, time: number, layout: Safe
     alpha: alpha * fade,
     lineWidth: age === 0 ? lineWidth : lineWidth * 0.8,
   }));
-  return { bars, peaks, levels, barAlpha: 0.55 + field.slow * 0.35, traces, scopeGlow: unit(drive.treblePulse) * 0.2, scale };
+  return { bars, spectra, peaks, levels, barAlpha: 0.55 + field.slow * 0.35, traces, scopeGlow: unit(drive.treblePulse) * 0.2, scale };
 }
 
 /**
@@ -178,18 +187,24 @@ export function drawSignalBand(context: SKRSContext2D, frame: SignalBandFrame, s
   context.lineCap = "round";
   context.lineJoin = "round";
   const radius = 4 * frame.scale;
-  for (const bar of frame.bars) {
-    if (emission) {
-      context.fillStyle = rgbCss(barColor(style, bar.band, 0.40, 0.08), 0.6);
-    } else {
-      const gradient = context.createLinearGradient(0, bar.y + bar.height, 0, bar.y);
-      gradient.addColorStop(0, rgbCss(barColor(style, bar.band, 0.40, 0), frame.barAlpha));
-      gradient.addColorStop(1, rgbCss(barColor(style, bar.band, 0.40, 0.12), frame.barAlpha));
-      context.fillStyle = gradient;
+  for (let side = 0; side < frame.spectra.length; side++) {
+    const channelStyle = side === 0 ? style : { ...style, warm: style.cool, cool: style.warm };
+    context.save();
+    context.globalAlpha *= 0.5;
+    for (const bar of frame.spectra[side]!) {
+      if (emission) {
+        context.fillStyle = rgbCss(barColor(channelStyle, bar.band, 0.40, 0.08), 0.6);
+      } else {
+        const gradient = context.createLinearGradient(0, bar.y + bar.height, 0, bar.y);
+        gradient.addColorStop(0, rgbCss(barColor(channelStyle, bar.band, 0.40, 0), frame.barAlpha));
+        gradient.addColorStop(1, rgbCss(barColor(channelStyle, bar.band, 0.40, 0.12), frame.barAlpha));
+        context.fillStyle = gradient;
+      }
+      context.beginPath();
+      context.roundRect(bar.x, bar.y, bar.width, bar.height, radius);
+      context.fill();
     }
-    context.beginPath();
-    context.roundRect(bar.x, bar.y, bar.width, bar.height, radius);
-    context.fill();
+    context.restore();
   }
   for (const peak of frame.peaks) {
     if (peak.alpha <= 0) continue;

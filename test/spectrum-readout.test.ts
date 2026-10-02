@@ -114,7 +114,7 @@ describe("fast promo spectrum with slow peak caps", () => {
 
   test("keeps standard and promo caches independent and remains deterministic across seeks", () => {
     const sample = (fps = 60) => track((index, band) => index === fps && band === 17 ? 0.12 : 0, fps);
-    const analysis = sample(), fresh = sample();
+const analysis = sample(), fresh = sample();
     const standard = spectrumReadoutAt(analysis, 61 / 60);
     const promo = spectrumReadoutAt(analysis, 61 / 60, "promo");
     expect(promo.levels[17]!).toBeGreaterThan(standard.levels[17]! * 2);
@@ -143,5 +143,47 @@ describe("fast promo spectrum with slow peak caps", () => {
         expect(Array.from(state.peaks)).toEqual(new Array(64).fill(0));
       }
     }
+  });
+});
+
+describe("stereo readout", () => {
+  const stereo = () => {
+    const analysis = track(() => 0);
+    for (const [index, frame] of analysis.frames.entries()) {
+      frame.spectrumLeft = Float32Array.from({ length: 64 }, (_, band) =>
+        index >= 60 && index < 120 && band === 17 ? 0.8 : 0);
+      frame.spectrumRight = Float32Array.from({ length: 64 }, (_, band) =>
+        index >= 60 && index < 120 ? (band === 17 ? 0.2 : band === 43 ? 0.8 : 0) : 0);
+    }
+    return analysis;
+  };
+
+  test("shares each band's ceiling so stereo balance is not independently amplified", () => {
+    const analysis = stereo();
+    for (const profile of ["standard", "promo"] as const) {
+      const left = spectrumReadoutAt(analysis, 1.8, profile, "left");
+      const right = spectrumReadoutAt(analysis, 1.8, profile, "right");
+      expect(left.levels[17]!).toBeGreaterThan(0.99);
+      expect(right.levels[17]!).toBeCloseTo(0.25 ** 0.8, 5);
+      expect(left.levels[43]).toBe(0);
+      expect(right.levels[43]!).toBeGreaterThan(0.99);
+      expect(left.peaks[17]).toBe(1);
+      expect(right.peaks[17]!).toBeCloseTo(0.25 ** 0.8, 5);
+      expect(spectrumReadoutAt(analysis, 1.8, profile).levels[17]).toBe(0);
+    }
+  });
+
+  test("keeps channel history independent of seeks, profile and channel evaluation order", () => {
+    const analysis = stereo(), fresh = stereo();
+    const expected = spectrumReadoutAt(analysis, 2.317, "promo", "left");
+    for (const time of [5.9, 0, 1.5, 4.1]) {
+      spectrumReadoutAt(fresh, time, "standard", "right");
+      spectrumReadoutAt(fresh, time, "promo", "right");
+      spectrumReadoutAt(fresh, time, "promo", "left");
+    }
+    expect(spectrumReadoutAt(fresh, 2.317, "promo", "left")).toEqual(expected);
+    expect(spectrumReadoutAt(fresh, 2.317, "promo", "right"))
+      .toEqual(spectrumReadoutAt(analysis, 2.317, "promo", "right"));
+    expect(expected.peaks[17]!).toBeCloseTo(1 - (2.317 - (119 / 60 + 0.3)) * 0.22, 6);
   });
 });

@@ -1,5 +1,6 @@
 import { sha256 } from "../math/random.js";
 import { hashFile } from "../audio/decode.js";
+import { ensureStereoAnalysis } from "../audio/stereo.js";
 import { renderDimensions, validatePromoRequirements } from "../config.js";
 import {
   ANALYSIS_VERSION,
@@ -95,6 +96,7 @@ export async function renderVideo(
   const totalFrames = Math.max(1, Math.ceil(requestedDuration * fps - 1e-9));
   const duration = totalFrames / fps;
   resolveFadeDurations(duration, request.config.output.fadeSeconds, request.fadeInSeconds, request.fadeOutSeconds);
+  analysis = await ensureStereoAnalysis(request.audioPath, analysis);
   const seed = resolveRenderSeed(request.config, analysis);
   const renderSize = renderDimensions(request.config);
   // Decode before opening the output: a bad image must not truncate an existing MP4.

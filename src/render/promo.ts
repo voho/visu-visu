@@ -128,13 +128,18 @@ function fitCredits(context: SKRSContext2D, text: ProjectConfig["text"], width: 
 
 export interface PromoSignalFrame {
   bars: Array<{ x: number; y: number; width: number; height: number; peakY: number; peakLevel: number; level: number }>;
+  /** Left then right; both share the single maximum peak row in bars. */
+  spectra: [PromoSignalFrame["bars"], PromoSignalFrame["bars"]];
   traces: Array<Array<{ x: number; y: number }>>;
 }
 
 /** Seek-independent envelopes retain the analyser's smooth attacks and falling peaks. */
 export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: number, height: number,
   layout = createPromoLayout(width, height)): PromoSignalFrame {
-  const { levels, peaks } = spectrumReadoutAt(analysis, time, "promo");
+  const left = spectrumReadoutAt(analysis, time, "promo", "left");
+  const right = spectrumReadoutAt(analysis, time, "promo", "right");
+  const levels = Float32Array.from(left.levels, (value, band) => Math.max(value, right.levels[band]!));
+  const peaks = Float32Array.from(left.peaks, (value, band) => Math.max(value, right.peaks[band]!));
   const pitch = layout.spectrumWidth / SPECTRUM_STRIP_BANDS;
   const barWidth = pitch * 0.68;
   const maxHeight = layout.spectrumBaseline - layout.spectrumTop;
@@ -147,6 +152,12 @@ export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: num
       peakY: Math.max(layout.spectrumTop, layout.spectrumBaseline - peaks[index]! * weight * (maxHeight - cap) - cap),
       peakLevel: peaks[index]!, level };
   });
+  const spectra = [left, right].map((channel, side) => bars.map((bar, index) => {
+    const weight = 1 - index / (SPECTRUM_STRIP_BANDS - 1) * 0.25;
+    const height = channel.levels[index]! * weight * (maxHeight - cap);
+    return { ...bar, x: bar.x + (side ? 1 : -1) * pitch * 0.10,
+      y: layout.spectrumBaseline - height, height, level: channel.levels[index]! };
+  })) as PromoSignalFrame["spectra"];
   const field = audioFieldAt(analysis, time);
   const amplitude = layout.scopeHeight / 2 * Math.min(1, Math.sqrt(Math.max(0, field.fast)) * (0.095 / 0.060));
   const traces = [0, 1, 2].map(age => {
@@ -159,7 +170,7 @@ export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: num
         y: layout.scopeY - smoothSample(waveform, p) / peak * amplitude * Math.sin(p * Math.PI) ** 0.6 };
     });
   });
-  return { bars, traces };
+  return { bars, spectra, traces };
 }
 
 /** A deliberately independent composition: no sculpture or standard credit strip. */
@@ -262,17 +273,27 @@ export class PromoRenderer {
     const { spectrumX, spectrumWidth, spectrumTop, spectrumBaseline } = this.layout;
     context.save();
     context.beginPath(); context.rect(spectrumX, spectrumTop, spectrumWidth, spectrumBaseline - spectrumTop); context.clip();
+    for (let side = 0; side < signals.spectra.length; side++) {
+      context.save(); context.globalAlpha = 0.5;
+      const bars = signals.spectra[side]!;
+      for (let index = 0; index < bars.length; index++) {
+        const bar = bars[index]!;
+        const color = liftSwatch(paletteRgb(this.palette, index / bars.length * 270 + side * 180), 0.38, 0.03);
+        if (bar.height > 0) {
+          const gradient = context.createLinearGradient(0, spectrumBaseline, 0, bar.y);
+          gradient.addColorStop(0, rgbCss(color, 0.12));
+          gradient.addColorStop(0.60, rgbCss(color, 0.48));
+          gradient.addColorStop(1, rgbCss(color, 0.88));
+          context.fillStyle = gradient;
+          context.beginPath(); context.roundRect(bar.x, bar.y, bar.width, bar.height + 4 * scale, 3 * scale); context.fill();
+        }
+      }
+      context.restore();
+    }
+    // One cap per band: the higher held peak from either channel.
     for (let index = 0; index < signals.bars.length; index++) {
       const bar = signals.bars[index]!;
       const color = liftSwatch(paletteRgb(this.palette, index / signals.bars.length * 270), 0.38, 0.03);
-      if (bar.height > 0) {
-        const gradient = context.createLinearGradient(0, spectrumBaseline, 0, bar.y);
-        gradient.addColorStop(0, rgbCss(color, 0.12));
-        gradient.addColorStop(0.60, rgbCss(color, 0.48));
-        gradient.addColorStop(1, rgbCss(color, 0.88));
-        context.fillStyle = gradient;
-        context.beginPath(); context.roundRect(bar.x, bar.y, bar.width, bar.height + 4 * scale, 3 * scale); context.fill();
-      }
       const visibility = clamp(bar.peakLevel / 0.04);
       context.fillStyle = rgbCss(liftSwatch(color, 0.48, 0.1), visibility * 0.80);
       context.fillRect(bar.x, bar.peakY, bar.width, Math.max(0.7, 2 * scale));

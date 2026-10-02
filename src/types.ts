@@ -1,5 +1,5 @@
 export const ANALYSIS_VERSION = 2;
-export const RENDERER_VERSION = 24;
+export const RENDERER_VERSION = 25;
 
 export interface OutputConfig {
   width: number;
@@ -47,6 +47,8 @@ export interface ProjectConfig {
 
 export interface AudioPcm {
   samples: Float32Array;
+  /** Real stereo samples alongside the original mono analysis mix. */
+  channels?: { left: Float32Array; right: Float32Array };
   sampleRate: number;
   duration: number;
   sourceHash: string;
@@ -63,6 +65,9 @@ export interface AnalysisFrame {
   flux: number;
   onset: number;
   spectrum: Float32Array;
+  /** Optional on older version-2 caches; always emitted by new analysis. */
+  spectrumLeft?: Float32Array;
+  spectrumRight?: Float32Array;
   waveform: Float32Array;
 }
 

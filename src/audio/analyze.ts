@@ -12,6 +12,8 @@ interface RawFrame {
   centroid: number;
   flux: number;
   spectrum: Float32Array;
+  spectrumLeft: Float32Array;
+  spectrumRight: Float32Array;
   waveform: Float32Array;
 }
 
@@ -57,6 +59,9 @@ function rangeEnergy(spectrum: Float32Array, startRatio: number, endRatio: numbe
 
 export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number): AudioAnalysis {
   if (pcm.samples.length === 0) throw new Error("Cannot analyze empty audio");
+  if (pcm.channels && (pcm.channels.left.length !== pcm.samples.length || pcm.channels.right.length !== pcm.samples.length)) {
+    throw new Error("Stereo channels must match the mono timeline");
+  }
   const fft = new RealFft(FFT_SIZE);
   const window = new Float32Array(FFT_SIZE);
   const hann = new Float32Array(FFT_SIZE);
@@ -65,6 +70,11 @@ export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number):
   }
 
   const ranges = logBandRanges(pcm.sampleRate, spectrumBands);
+  const channelSpectrum = (samples: Float32Array, start: number): Float32Array => {
+    for (let index = 0; index < FFT_SIZE; index++) window[index] = (samples[start + index] ?? 0) * hann[index]!;
+    const magnitudes = fft.magnitudes(window);
+    return Float32Array.from(ranges, ([first, last]) => Math.log1p(bandMean(magnitudes, first, last) * 240));
+  };
   const frameCount = Math.max(1, Math.ceil(pcm.duration * fps));
   const rawFrames: RawFrame[] = [];
   let previousSpectrum = new Float32Array(spectrumBands);
@@ -118,6 +128,8 @@ export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number):
       centroid: magnitudeSum > 0 ? weightedFrequency / magnitudeSum : 0,
       flux: flux / spectrumBands,
       spectrum,
+      spectrumLeft: pcm.channels ? channelSpectrum(pcm.channels.left, startSample) : spectrum,
+      spectrumRight: pcm.channels ? channelSpectrum(pcm.channels.right, startSample) : spectrum,
       waveform,
     });
     previousSpectrum = spectrum;
@@ -131,6 +143,13 @@ export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number):
     for (const value of frame.spectrum) spectrumValues.push(value);
   }
   const spectrumScale = Math.max(0.0001, percentile(spectrumValues, 0.985));
+  let stereoScale = pcm.channels ? 0.0001 : spectrumScale;
+  if (pcm.channels) for (const frame of rawFrames) {
+    for (const value of frame.spectrumLeft) stereoScale = Math.max(stereoScale, value);
+    for (const value of frame.spectrumRight) stereoScale = Math.max(stereoScale, value);
+  }
+  // Shared headroom preserves balance even in sparse, hard-panned tones:
+  // a percentile ceiling would clip both channels' loud bins to the same 1.
   const normalizedFlux = rawFrames.map((frame) => clamp(frame.flux / fluxScale));
   const frames: AnalysisFrame[] = [];
   let smoothedRms = 0;
@@ -171,6 +190,8 @@ export function analyzeAudio(pcm: AudioPcm, fps: number, spectrumBands: number):
       flux,
       onset,
       spectrum,
+      spectrumLeft: Float32Array.from(raw.spectrumLeft, value => clamp((value / stereoScale) ** 0.82)),
+      spectrumRight: Float32Array.from(raw.spectrumRight, value => clamp((value / stereoScale) ** 0.82)),
       waveform,
     });
   }

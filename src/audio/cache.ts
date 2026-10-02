@@ -2,8 +2,10 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ANALYSIS_VERSION, type AnalysisFrame, type AudioAnalysis } from "../types.js";
 
-interface SerializedFrame extends Omit<AnalysisFrame, "spectrum" | "waveform"> {
+interface SerializedFrame extends Omit<AnalysisFrame, "spectrum" | "spectrumLeft" | "spectrumRight" | "waveform"> {
   spectrum: number[];
+  spectrumLeft?: number[];
+  spectrumRight?: number[];
   waveform: number[];
 }
 
@@ -60,9 +62,11 @@ export async function saveAnalysis(path: string, analysis: AudioAnalysis): Promi
   const absolutePath = resolve(path);
   const serialized: SerializedAnalysis = {
     ...analysis,
-    frames: analysis.frames.map((frame) => ({
+    frames: analysis.frames.map(({ spectrumLeft, spectrumRight, ...frame }) => ({
       ...frame,
       spectrum: Array.from(frame.spectrum),
+      ...(spectrumLeft === undefined ? {} : { spectrumLeft: Array.from(spectrumLeft) }),
+      ...(spectrumRight === undefined ? {} : { spectrumRight: Array.from(spectrumRight) }),
       waveform: Array.from(frame.waveform),
     })),
   };
@@ -75,8 +79,8 @@ export async function loadAnalysis(path: string): Promise<AudioAnalysis> {
   let parsed: unknown;
   try {
     const info = await stat(absolutePath);
-    if (info.size > 128 * 1024 * 1024) {
-      throw new Error("analysis cache exceeds the 128 MiB JSON limit");
+    if (info.size > 192 * 1024 * 1024) {
+      throw new Error("analysis cache exceeds the 192 MiB JSON limit");
     }
     parsed = JSON.parse(await readFile(absolutePath, "utf8")) as unknown;
   } catch (error) {
@@ -103,12 +107,17 @@ export async function loadAnalysis(path: string): Promise<AudioAnalysis> {
   if (parsed.frames.length !== expectedFrames) {
     throw new Error(`frames must contain ${expectedFrames} entries for ${duration}s at ${fps} fps`);
   }
-  if (expectedFrames * (8 + spectrumBands + waveformPoints) > 10_000_000) {
+  const first = parsed.frames[0];
+  const stereo = isRecord(first) && (first.spectrumLeft !== undefined || first.spectrumRight !== undefined);
+  if (expectedFrames * (8 + spectrumBands * (stereo ? 3 : 1) + waveformPoints) > 10_000_000) {
     throw new Error("Analysis feature data is too large");
   }
 
   const frames: AnalysisFrame[] = parsed.frames.map((value, index) => {
     if (!isRecord(value)) throw new Error(`frames[${index}] must be an object`);
+    if ((value.spectrumLeft !== undefined) !== stereo || (value.spectrumRight !== undefined) !== stereo) {
+      throw new Error("Stereo spectra must include both channels on every frame");
+    }
     const scalar = (name: string): number =>
       checkedNumber(value[name], `frames[${index}].${name}`, 0, 1);
     return {
@@ -121,6 +130,10 @@ export async function loadAnalysis(path: string): Promise<AudioAnalysis> {
       flux: scalar("flux"),
       onset: scalar("onset"),
       spectrum: checkedArray(value.spectrum, spectrumBands, `frames[${index}].spectrum`, 0, 1),
+      ...(stereo ? {
+        spectrumLeft: checkedArray(value.spectrumLeft, spectrumBands, `frames[${index}].spectrumLeft`, 0, 1),
+        spectrumRight: checkedArray(value.spectrumRight, spectrumBands, `frames[${index}].spectrumRight`, 0, 1),
+      } : {}),
       waveform: checkedArray(value.waveform, waveformPoints, `frames[${index}].waveform`, -1, 1),
     };
   });
