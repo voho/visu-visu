@@ -79,3 +79,69 @@ describe("64-band spectrum envelopes and falling peaks", () => {
     expect(spectrumReadoutAt(hit, 5.9).peaks[17]).toBeLessThan(1e-5);
   });
 });
+
+describe("fast promo spectrum with slow peak caps", () => {
+  test("reacts within the first 60 fps frame and releases quickly with lighter treble momentum", () => {
+    const analysis = track(index => index === 60 ? 0.12 : 0);
+    const before = spectrumReadoutAt(analysis, 1 - 1e-6, "promo");
+    expect(Array.from(before.levels)).toEqual(new Array(64).fill(0));
+    expect(Array.from(before.peaks)).toEqual(new Array(64).fill(0));
+    const onset = spectrumReadoutAt(analysis, 1, "promo");
+    expect(onset.levels[0]).toBe(0);
+    expect(onset.peaks[0]).toBe(1);
+    const nextFrame = spectrumReadoutAt(analysis, 61 / 60, "promo");
+    expect(Math.min(...nextFrame.levels)).toBeGreaterThan(0.65);
+    const released = spectrumReadoutAt(analysis, 1.3, "promo");
+    expect(Math.max(...released.levels)).toBeLessThan(0.1);
+    expect(released.levels[63]!).toBeLessThan(released.levels[0]!);
+    expect(Math.min(...released.peaks)).toBe(1);
+  });
+
+  test("holds raw peaks for 300 ms, then falls independently at 0.22 per second", () => {
+    const analysis = track((index, band) => index === 60 && band === 17 ? 0.12 : 0);
+    for (const time of [1, 1.02, 1.15, 1.299, 1.3]) {
+      expect(spectrumReadoutAt(analysis, time, "promo").peaks[17]).toBeCloseTo(1, 6);
+    }
+    for (const time of [1.4, 1.8, 2.3, 3.7, 5.7]) {
+      expect(spectrumReadoutAt(analysis, time, "promo").peaks[17]).toBeCloseTo(1 - (time - 1.3) * 0.22, 6);
+    }
+    const earlier = spectrumReadoutAt(analysis, 2.301, "promo").peaks[17]!;
+    const later = spectrumReadoutAt(analysis, 2.309, "promo").peaks[17]!;
+    expect(earlier - later).toBeCloseTo(0.008 * 0.22, 6);
+    expect(spectrumReadoutAt(analysis, 2.3, "promo").levels[17]!).toBeLessThan(1e-5);
+    expect(spectrumReadoutAt(analysis, 6, "promo").peaks[17]!).toBeLessThan(1e-5);
+  });
+
+  test("keeps standard and promo caches independent and remains deterministic across seeks", () => {
+    const sample = (fps = 60) => track((index, band) => index === fps && band === 17 ? 0.12 : 0, fps);
+    const analysis = sample(), fresh = sample();
+    const standard = spectrumReadoutAt(analysis, 61 / 60);
+    const promo = spectrumReadoutAt(analysis, 61 / 60, "promo");
+    expect(promo.levels[17]!).toBeGreaterThan(standard.levels[17]! * 2);
+    for (const time of [5.99, 0, 4.1, 1.2, 1, 3]) {
+      spectrumReadoutAt(fresh, time, "promo");
+      spectrumReadoutAt(fresh, time, "standard");
+    }
+    expect(spectrumReadoutAt(fresh, 61 / 60, "promo")).toEqual(promo);
+    expect(spectrumReadoutAt(fresh, 61 / 60)).toEqual(standard);
+    expect(spectrumReadoutAt(analysis, 61 / 60, "standard")).toEqual(standard);
+    const expected = spectrumReadoutAt(analysis, 2.317, "promo");
+    expect(spectrumReadoutAt(fresh, 2.317, "promo")).toEqual(expected);
+    expect(spectrumReadoutAt(sample(20), 2.317, "promo").peaks).toEqual(expected.peaks);
+    const before = spectrumReadoutAt(analysis, 2 - 1e-6, "promo").peaks[17]!;
+    const after = spectrumReadoutAt(analysis, 2 + 1e-6, "promo").peaks[17]!;
+    expect(before - after).toBeCloseTo(2e-6 * 0.22, 6);
+  });
+
+  test("never creates promo motion from silent, invalid or empty spectra", () => {
+    const silent = track(() => 0);
+    const broken = track((_, band) => band % 2 ? Number.NaN : Infinity);
+    for (const analysis of [silent, broken, { ...silent, frames: [] }]) {
+      for (const time of [0, 1.357, 5.9, Number.NaN, -2]) {
+        const state = spectrumReadoutAt(analysis, time, "promo");
+        expect(Array.from(state.levels)).toEqual(new Array(64).fill(0));
+        expect(Array.from(state.peaks)).toEqual(new Array(64).fill(0));
+      }
+    }
+  });
+});

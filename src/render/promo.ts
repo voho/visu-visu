@@ -11,24 +11,40 @@ import { spectrumReadoutAt, SPECTRUM_STRIP_BANDS } from "./spectrum-readout.js";
 
 export interface PromoLayout {
   cover: { x: number; y: number; size: number };
-  text: { x: number; width: number; centerY: number; titleSize: number; artistSize: number };
+  text: { x: number; width: number; centerY: number; top: number; bottom: number; titleSize: number; artistSize: number };
+  scopeX: number;
   scopeY: number;
+  scopeWidth: number;
+  scopeHeight: number;
+  spectrumX: number;
+  spectrumWidth: number;
   spectrumTop: number;
   spectrumBaseline: number;
 }
 
-/** The record is the hero; the bottom 30% belongs exclusively to the spectrum. */
+/** Golden gallery: a centered cover, separate credits/waveform, and player-safe spectrum. */
 export function createPromoLayout(width: number, height: number): PromoLayout {
+  const phi = (1 + Math.sqrt(5)) / 2;
   const landscape = width / height >= 1.2;
   const size = Math.min(width * (landscape ? 0.28 : 0.36), height * 0.40);
   const x = width * 0.08;
-  const textX = x + size + width * 0.055;
+  // The golden column needs a cover-width fallback on portrait and square frames.
+  const textX = Math.max(width / phi ** 2, x + size + width * 0.055);
+  const textWidth = width * 0.92 - textX;
+  const safeTop = height * 0.06, safeBottom = height * 0.94;
+  const safeHeight = safeBottom - safeTop;
+  const scopeY = safeTop + safeHeight / phi;
+  const scopeHeight = size * 0.68;
+  const gap = height * 0.022;
+  const titleSize = Math.min(height * 0.105, width * (landscape ? 0.062 : 0.070));
   return {
     cover: { x, y: (height - size) / 2, size },
-    text: { x: textX, width: width * 0.92 - textX, centerY: height * 0.5,
-      titleSize: Math.min(height * 0.105, width * (landscape ? 0.062 : 0.070)),
-      artistSize: Math.min(height * 0.046, width * (landscape ? 0.030 : 0.045)) },
-    scopeY: height * 0.5, spectrumTop: height * 0.7, spectrumBaseline: height,
+    text: { x: textX, width: textWidth, centerY: safeTop + safeHeight / phi ** 2,
+      top: safeTop, bottom: scopeY - scopeHeight / 2 - gap, titleSize, artistSize: titleSize },
+    scopeX: textX, scopeY, scopeWidth: textWidth, scopeHeight,
+    spectrumX: x, spectrumWidth: width - x * 2,
+    spectrumTop: Math.max(scopeY + scopeHeight / 2 + gap, safeBottom - height * 0.3),
+    spectrumBaseline: safeBottom,
   };
 }
 
@@ -72,27 +88,30 @@ export interface PromoSignalFrame {
 
 /** Seek-independent envelopes retain the analyser's smooth attacks and falling peaks. */
 export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: number, height: number): PromoSignalFrame {
-  const { levels, peaks } = spectrumReadoutAt(analysis, time);
-  const pitch = width / SPECTRUM_STRIP_BANDS;
+  const layout = createPromoLayout(width, height);
+  const { levels, peaks } = spectrumReadoutAt(analysis, time, "promo");
+  const pitch = layout.spectrumWidth / SPECTRUM_STRIP_BANDS;
   const barWidth = pitch * 0.68;
-  const maxHeight = height * 0.3;
+  const maxHeight = layout.spectrumBaseline - layout.spectrumTop;
   const cap = Math.max(0.7, height / 1080 * 2);
   const bars = Array.from(levels, (level, index) => {
     const weight = 1 - index / (SPECTRUM_STRIP_BANDS - 1) * 0.25;
     const barHeight = level * weight * (maxHeight - cap);
-    return { x: pitch * index + (pitch - barWidth) / 2, y: height - barHeight,
-      width: barWidth, height: barHeight, peakY: Math.max(height * 0.7, height - peaks[index]! * weight * (maxHeight - cap) - cap),
+    return { x: layout.spectrumX + pitch * index + (pitch - barWidth) / 2, y: layout.spectrumBaseline - barHeight,
+      width: barWidth, height: barHeight,
+      peakY: Math.max(layout.spectrumTop, layout.spectrumBaseline - peaks[index]! * weight * (maxHeight - cap) - cap),
       peakLevel: peaks[index]!, level };
   });
   const field = audioFieldAt(analysis, time);
-  const amplitude = height * Math.min(0.060, Math.sqrt(Math.max(0, field.fast)) * 0.095);
+  const amplitude = layout.scopeHeight / 2 * Math.min(1, Math.sqrt(Math.max(0, field.fast)) * (0.095 / 0.060));
   const traces = [0, 1, 2].map(age => {
     const waveform = frameAt(analysis, Math.max(0, time - age / analysis.fps)).waveform;
     let peak = 0.035;
     for (const sample of waveform) if (Number.isFinite(sample)) peak = Math.max(peak, Math.abs(sample));
     return Array.from({ length: 385 }, (_, index) => {
       const p = index / 384;
-      return { x: p * width, y: height * 0.5 - smoothSample(waveform, p) / peak * amplitude * Math.sin(p * Math.PI) ** 0.6 };
+      return { x: layout.scopeX + p * layout.scopeWidth,
+        y: layout.scopeY - smoothSample(waveform, p) / peak * amplitude * Math.sin(p * Math.PI) ** 0.6 };
     });
   });
   return { bars, traces };
@@ -102,6 +121,8 @@ export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: num
 export class PromoRenderer {
   readonly canvas: Canvas;
   readonly layout: PromoLayout;
+  /** Fitted ink bounds also place the MilkDrop background's quiet region. */
+  readonly creditBounds: { x: number; y: number; width: number; height: number };
   private readonly context: SKRSContext2D;
   private readonly lockup: Canvas;
   private readonly palette: ScenePalette;
@@ -118,10 +139,10 @@ export class PromoRenderer {
     this.palette = artwork.palette;
     this.scopePhase = accentSwatches(this.palette).cool / this.palette.colors.length * 360;
     this.lockup = createCanvas(size.width, size.height);
-    this.paintLockup(config, artwork.thumbnail);
+    this.creditBounds = this.paintLockup(config, artwork.thumbnail);
   }
 
-  private paintLockup(config: ProjectConfig, thumbnail: Canvas): void {
+  private paintLockup(config: ProjectConfig, thumbnail: Canvas): PromoRenderer["creditBounds"] {
     const context = this.lockup.getContext("2d"), { cover, text } = this.layout;
     const scale = Math.min(this.canvas.width, this.canvas.height) / 1080;
     const radius = cover.size * 0.022;
@@ -140,19 +161,31 @@ export class PromoRenderer {
     context.lineWidth = Math.max(0.5, scale);
     context.beginPath(); context.roundRect(cover.x, cover.y, cover.size, cover.size, radius); context.stroke();
 
-    const title = textBlock(context, config.text.title, text.width, text.titleSize, "Promo Serif", 600, 0);
-    const artist = textBlock(context, config.text.artist, text.width, text.artistSize, "Promo Sans", 500, 0.09);
-    const gap = Math.min(this.canvas.height * 0.033, text.titleSize * 0.38);
     // Actual ink metrics center both lines as a group, not their font em boxes.
     const metrics = (block: TextBlock) => {
       context.font = block.font; context.letterSpacing = `${block.spacing}px`;
       const measured = block.lines.map(line => context.measureText(line));
       const ascent = Math.max(...measured.map(value => value.actualBoundingBoxAscent));
       const descent = Math.max(...measured.map(value => value.actualBoundingBoxDescent));
-      return { ascent, height: ascent + descent + (block.lines.length - 1) * block.lineHeight };
+      return { ascent, height: ascent + descent + (block.lines.length - 1) * block.lineHeight,
+        width: Math.max(...measured.map(value => value.width)) };
     };
+    let fontSize = text.titleSize;
+    let title: TextBlock, artist: TextBlock, gap: number;
+    for (;;) {
+      title = textBlock(context, config.text.title, text.width, fontSize, "Promo Serif", 600, 0);
+      artist = textBlock(context, config.text.artist, text.width, fontSize, "Promo Sans", 500, 0.09);
+      const commonSize = Math.min(title.size, artist.size);
+      if (commonSize < fontSize) { fontSize = commonSize; continue; }
+      gap = Math.min(this.canvas.height * 0.033, fontSize * 0.38);
+      if (metrics(title).height + gap + metrics(artist).height <= text.bottom - text.top || fontSize <= 1) break;
+      fontSize *= 0.94;
+    }
     const titleMetrics = metrics(title), artistMetrics = metrics(artist);
-    const top = text.centerY - (titleMetrics.height + gap + artistMetrics.height) / 2;
+    const creditHeight = titleMetrics.height + gap + artistMetrics.height;
+    // A larger byline or wrapped title can extend past the golden anchor. Lift
+    // that group just enough to preserve the waveform's full dynamic range.
+    const top = Math.max(text.top, Math.min(text.centerY - creditHeight / 2, text.bottom - creditHeight));
     const draw = (block: TextBlock, baseline: number, color: string) => {
       context.font = block.font; context.letterSpacing = `${block.spacing}px`;
       context.textAlign = "left"; context.textBaseline = "alphabetic";
@@ -162,6 +195,7 @@ export class PromoRenderer {
     };
     draw(title, top + titleMetrics.ascent, "#fafafa");
     draw(artist, top + titleMetrics.height + gap + artistMetrics.ascent, "#e8e8e8");
+    return { x: text.x, y: top, width: Math.max(titleMetrics.width, artistMetrics.width), height: creditHeight };
   }
 
   render(analysis: AudioAnalysis, time: number, background: Canvas): Buffer {
@@ -198,13 +232,14 @@ export class PromoRenderer {
 
   private drawSpectrum(signals: PromoSignalFrame): void {
     const context = this.context, height = this.canvas.height, scale = height / 1080;
+    const { spectrumX, spectrumWidth, spectrumTop, spectrumBaseline } = this.layout;
     context.save();
-    context.beginPath(); context.rect(0, this.layout.spectrumTop, this.canvas.width, height * 0.3); context.clip();
+    context.beginPath(); context.rect(spectrumX, spectrumTop, spectrumWidth, spectrumBaseline - spectrumTop); context.clip();
     for (let index = 0; index < signals.bars.length; index++) {
       const bar = signals.bars[index]!;
       const color = liftSwatch(paletteRgb(this.palette, index / signals.bars.length * 270), 0.38, 0.03);
       if (bar.height > 0) {
-        const gradient = context.createLinearGradient(0, height, 0, bar.y);
+        const gradient = context.createLinearGradient(0, spectrumBaseline, 0, bar.y);
         gradient.addColorStop(0, rgbCss(color, 0.12));
         gradient.addColorStop(0.60, rgbCss(color, 0.48));
         gradient.addColorStop(1, rgbCss(color, 0.88));

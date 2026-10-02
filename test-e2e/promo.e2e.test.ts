@@ -112,7 +112,7 @@ describe("promo mode end to end", () => {
     }
   }, 100_000);
 
-  test("renders a cover-led promo with live palette-matched MilkDrop, centered credits and bottom spectrum", async () => {
+  test("renders the Golden gallery with equally prominent credits, live MilkDrop and a reserved spectrum band", async () => {
     const output = join(directory, "promo.mp4");
     // This deliberately omits --engine and --milkdrop-presets: promo must select
     // the real immersive engine itself. No user media or browser mocks are used.
@@ -173,15 +173,23 @@ describe("promo mode end to end", () => {
     expect(mean(frame, { left: coverX[0]! + 10, right: coverX.at(-1)! - 10,
       top: coverY[0]! + 10, bottom: coverY.at(-1)! - 10 })).toBeGreaterThan(100);
 
-    const bands = inkBands(frame, { left: coverX.at(-1)! + 12, right: width - 25, top: 110, bottom: 250 });
+    // Gallery keeps the two credit lines above the separate right-hand scope.
+    // Identify their actual encoded ink, independent of the layout helper.
+    const bands = inkBands(frame, { left: coverX.at(-1)! + 12, right: width - 25, top: 75, bottom: 172 });
     expect(bands).toHaveLength(2);
     const title = bands[0]!, artist = bands[1]!;
-    expect(title.bottom - title.top).toBeGreaterThanOrEqual(15);
+    const titleHeight = title.bottom - title.top, artistHeight = artist.bottom - artist.top;
+    expect(titleHeight).toBeGreaterThanOrEqual(20);
     expect(title.right - title.left).toBeGreaterThan(120);
-    expect(artist.bottom - artist.top).toBeGreaterThanOrEqual(10);
-    expect(artist.right - artist.left).toBeGreaterThan(35);
+    expect(artistHeight).toBeGreaterThanOrEqual(20);
+    // Serif and sans-serif cap heights differ despite using the same em size.
+    expect(artistHeight / titleHeight).toBeGreaterThan(0.8);
+    expect(artistHeight / titleHeight).toBeLessThan(1.5);
+    expect(artist.right - artist.left).toBeGreaterThan(90);
     expect(Math.abs(title.left - artist.left)).toBeLessThan(4);
-    expect(Math.abs((title.top + artist.bottom) / 2 - height / 2)).toBeLessThan(16);
+    expect(title.top).toBeGreaterThan(height * 0.24);
+    expect(artist.bottom).toBeLessThan(height * 0.46);
+    expect(artist.top - title.bottom).toBeGreaterThan(7);
 
     // Away from cover, text, oscilloscope and bars, actual background pixels
     // must animate while keeping their luminance below the foreground cover.
@@ -204,17 +212,17 @@ describe("promo mode end to end", () => {
     expect(brightness / (background.length / 3)).toBeLessThan(60);
     expect(motion / (background.length - plane)).toBeGreaterThan(0.015);
 
-    // Bars begin at the bottom edge, with a substantial illuminated footprint.
-    // Checking both the baseline and the 70–100% strip catches old safe-area
-    // spectrum placement without requiring every frequency to be equally loud.
-    let bottomInk = 0, barInk = 0;
-    for (let y = 255; y < height; y++) for (let x = 20; x < width - 20; x++) {
+    // The live bars occupy their new band above the player-control reserve.
+    // Exact clipping is checked against a flat background in the unit tests;
+    // MilkDrop may legitimately illuminate pixels in the reserved margin.
+    let baselineInk = 0, barInk = 0;
+    for (let y = 275; y < 339; y++) for (let x = 52; x < 588; x++) {
       const index = (y * width + x) * 3;
       if (Math.max(frame[index]!, frame[index + 1]!, frame[index + 2]!) > 70) {
-        barInk++; if (y >= height - 5) bottomInk++;
+        barInk++; if (y >= 332) baselineInk++;
       }
     }
-    expect(bottomInk).toBeGreaterThan(300);
-    expect(barInk).toBeGreaterThan(1_500);
+    expect(baselineInk).toBeGreaterThan(100);
+    expect(barInk).toBeGreaterThan(800);
   }, PROMO_E2E_TIMEOUT);
 });

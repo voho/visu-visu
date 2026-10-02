@@ -10,7 +10,27 @@ const CEILING_PERCENTILE = 0.98;
 const CEILING_FLOOR = 0.12;
 const unit = (value: number): number => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 
-interface ReadoutProfile {
+export type SpectrumReadoutProfile = "standard" | "promo";
+
+interface ReadoutTiming {
+  attack: number;
+  inertia: number;
+  releaseBass: number;
+  releaseRange: number;
+  peakHold: number;
+  peakFall: number;
+}
+
+const timings: Record<SpectrumReadoutProfile, ReadoutTiming> = {
+  standard: { attack: 0.032, inertia: 0.022, releaseBass: 0.40, releaseRange: 0.28,
+    peakHold: SPECTRUM_PEAK_HOLD_SECONDS, peakFall: SPECTRUM_PEAK_FALL_PER_SECOND },
+  // Promo bars follow individual transients while the caps retain the recent
+  // contour, so quick movement does not erase the shape of a musical phrase.
+  promo: { attack: 0.008, inertia: 0.005, releaseBass: 0.090, releaseRange: 0.045,
+    peakHold: 0.3, peakFall: 0.22 },
+};
+
+interface ReadoutData {
   fps: number;
   count: number;
   targets: Float64Array;
@@ -20,7 +40,7 @@ interface ReadoutProfile {
   peaks: Float64Array;
   heldUntil: Float64Array;
 }
-const profiles = new WeakMap<AudioAnalysis, ReadoutProfile>();
+const profiles = new WeakMap<AudioAnalysis, Partial<Record<SpectrumReadoutProfile, ReadoutData>>>();
 
 /** Area sampling retains independent source bins and supports older, lower-resolution analyses. */
 function sourceBands(source: Float32Array): Float64Array {
@@ -38,10 +58,10 @@ function sourceBands(source: Float32Array): Float64Array {
 }
 
 /** Exact two-pole integration keeps movement smooth between analysis frames. */
-function advance(start: number, smoothed: number, target: number, elapsed: number, band: number): { envelope: number; value: number } {
-  const response = target > start ? 0.032 : 0.40 - band / (SPECTRUM_STRIP_BANDS - 1) * 0.28;
+function advance(start: number, smoothed: number, target: number, elapsed: number, band: number, timing: ReadoutTiming): { envelope: number; value: number } {
+  const response = target > start ? timing.attack : timing.releaseBass - band / (SPECTRUM_STRIP_BANDS - 1) * timing.releaseRange;
   const decay = Math.exp(-elapsed / response);
-  const inertia = 0.022;
+  const inertia = timing.inertia;
   const inertiaDecay = Math.exp(-elapsed / inertia);
   return {
     envelope: target + (start - target) * decay,
@@ -50,11 +70,11 @@ function advance(start: number, smoothed: number, target: number, elapsed: numbe
   };
 }
 
-function fallenPeak(peak: number, heldUntil: number, time: number): number {
-  return Math.max(0, peak - Math.max(0, time - heldUntil) * SPECTRUM_PEAK_FALL_PER_SECOND);
+function fallenPeak(peak: number, heldUntil: number, time: number, timing: ReadoutTiming): number {
+  return Math.max(0, peak - Math.max(0, time - heldUntil) * timing.peakFall);
 }
 
-function build(analysis: AudioAnalysis): ReadoutProfile {
+function build(analysis: AudioAnalysis, timing: ReadoutTiming): ReadoutData {
   const fps = Number.isFinite(analysis.fps) && analysis.fps > 0 ? analysis.fps : 30;
   const count = analysis.frames.length;
   const targets = new Float64Array(count * SPECTRUM_STRIP_BANDS);
@@ -79,17 +99,17 @@ function build(analysis: AudioAnalysis): ReadoutProfile {
       let peak = 0, hold = 0;
       if (index > 0) {
         const previous = offset - SPECTRUM_STRIP_BANDS;
-        const next = advance(starts[previous]!, smoothed[previous]!, targets[previous]!, 1 / fps, band);
+        const next = advance(starts[previous]!, smoothed[previous]!, targets[previous]!, 1 / fps, band, timing);
         starts[offset] = next.envelope;
         smoothed[offset] = next.value;
         hold = heldUntil[previous]!;
-        peak = fallenPeak(peaks[previous]!, Math.max((index - 1) / fps, hold), time);
+        peak = fallenPeak(peaks[previous]!, Math.max((index - 1) / fps, hold), time, timing);
       }
       // Capture raw peaks immediately, even when the bar is still easing into a hit.
       const target = unit(targets[offset]! / ceilings[band]!) ** 0.8;
       if (target > 0 && target >= peak) {
         peak = target;
-        hold = time + SPECTRUM_PEAK_HOLD_SECONDS;
+        hold = time + timing.peakHold;
       }
       peaks[offset] = peak;
       heldUntil[offset] = hold;
@@ -99,9 +119,12 @@ function build(analysis: AudioAnalysis): ReadoutProfile {
 }
 
 /** Causal envelopes and peak hold, indexed by absolute time rather than render history. */
-export function spectrumReadoutAt(analysis: AudioAnalysis, time: number): { levels: Float32Array; peaks: Float32Array } {
-  let profile = profiles.get(analysis);
-  if (!profile) { profile = build(analysis); profiles.set(analysis, profile); }
+export function spectrumReadoutAt(analysis: AudioAnalysis, time: number, kind: SpectrumReadoutProfile = "standard"): { levels: Float32Array; peaks: Float32Array } {
+  const timing = timings[kind];
+  let cached = profiles.get(analysis);
+  if (!cached) { cached = {}; profiles.set(analysis, cached); }
+  let profile = cached[kind];
+  if (!profile) { profile = build(analysis, timing); cached[kind] = profile; }
   const levels = new Float32Array(SPECTRUM_STRIP_BANDS);
   const peaks = new Float32Array(SPECTRUM_STRIP_BANDS);
   if (!profile.count) return { levels, peaks };
@@ -113,11 +136,11 @@ export function spectrumReadoutAt(analysis: AudioAnalysis, time: number): { leve
   const elapsed = safeTime - frameTime;
   for (let band = 0; band < SPECTRUM_STRIP_BANDS; band++) {
     const offset = index * SPECTRUM_STRIP_BANDS + band;
-    const value = advance(profile.starts[offset]!, profile.smoothed[offset]!, profile.targets[offset]!, elapsed, band).value;
+    const value = advance(profile.starts[offset]!, profile.smoothed[offset]!, profile.targets[offset]!, elapsed, band, timing).value;
     levels[band] = unit(value / profile.ceilings[band]!) ** 0.8;
     // A sustained final frame still holds its own level; no invented post-track silence.
     const target = unit(profile.targets[offset]! / profile.ceilings[band]!) ** 0.8;
-    peaks[band] = Math.max(target, levels[band]!, fallenPeak(profile.peaks[offset]!, Math.max(frameTime, profile.heldUntil[offset]!), safeTime));
+    peaks[band] = Math.max(target, levels[band]!, fallenPeak(profile.peaks[offset]!, Math.max(frameTime, profile.heldUntil[offset]!), safeTime, timing));
   }
   return { levels, peaks };
 }

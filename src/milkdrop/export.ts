@@ -7,7 +7,7 @@ import type { PreparedArtwork } from "../render/artwork.js";
 import type { RenderProgress, RenderResult } from "../render/render.js";
 import { FfmpegEncoder } from "../render/encoder.js";
 import { VisualizerRenderer } from "../render/renderer.js";
-import { PromoRenderer, createPromoLayout } from "../render/promo.js";
+import { PromoRenderer } from "../render/promo.js";
 import { createSafeLayout, creditLockupEllipse } from "../render/layout.js";
 import { randomPalette } from "../render/palette.js";
 import { deriveMusicMotion } from "../render/music-motion.js";
@@ -81,7 +81,9 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
   const background = createCanvas(width, height), backgroundContext = background.getContext("2d");
   const cover = promo ? undefined : artwork?.canvas.toBuffer("image/png");
   const layout = createSafeLayout(width, height), ellipse = creditLockupEllipse(layout, width, height);
-  const promoLayout = createPromoLayout(width, height);
+  const promoRenderer = renderer instanceof PromoRenderer ? renderer : undefined;
+  const promoCredits = promoRenderer?.creditBounds;
+  const promoCover = promoRenderer?.layout.cover;
   const features = Array.from({ length: plan.simulationFrames }, (_, frame) => {
     const time = plan.simulationStart + frame / fps;
     const motion = deriveMusicMotion(analysis, time), dynamics = deriveSceneDynamics(analysis, time);
@@ -133,11 +135,17 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
     const job = { base: origin + prefix, width, height, fps, seed, start: request.start, totalFrames,
       sourceDuration: analysis.duration, ...plan, sampleRate: 44100, palette: palette.colors,
       lowFlash: request.config.visual.lowFlash, hasArtwork: Boolean(cover), intensity: request.config.visual.intensity,
-      credit: promo ? { cx: (promoLayout.text.x + promoLayout.text.width / 2) / width, cy: 0.5, rx: 0.30, ry: 0.14 }
+      credit: promoCredits ? {
+        cx: (promoCredits.x + promoCredits.width / 2) / width,
+        cy: (promoCredits.y + promoCredits.height / 2) / height,
+        rx: (promoCredits.width * 0.6 + height * 0.025) / width,
+        ry: (promoCredits.height * 0.7 + height * 0.025) / height,
+      }
         : { cx: ellipse.x, cy: ellipse.y, rx: ellipse.rx, ry: ellipse.ry }, features };
-    Object.assign(job, { hero: promo ? {
-      cx: (promoLayout.cover.x + promoLayout.cover.size / 2) / width, cy: 0.5,
-      rx: promoLayout.cover.size / width * 0.6, ry: promoLayout.cover.size / height * 0.6,
+    Object.assign(job, { hero: promoCover ? {
+      cx: (promoCover.x + promoCover.size / 2) / width,
+      cy: (promoCover.y + promoCover.size / 2) / height,
+      rx: promoCover.size / width * 0.6, ry: promoCover.size / height * 0.6,
     } : { cx: layout.centerX / width, cy: layout.horizon / height,
       rx: layout.width / width * 0.48, ry: (layout.graphBottom - layout.graphTop) / height * 0.45 } });
     await browser.evaluate(`window.milkdrop.init(${JSON.stringify(job)})`);
