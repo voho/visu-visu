@@ -63,17 +63,22 @@ function createCompositor(cover) {
     float light=1.0-exp(-signal*(1.5+uIntensity*0.45));
     float phase=fract(hue(source)+signal*0.09+uTime*0.007+uMusic.y*0.04);
     vec3 swatch=texture(uPalette,vec2(phase,0.5)).rgb;
-    // Preserve the cover's relative RGB channels, including perfectly neutral
-    // covers, while retaining the preset's full range of luminance and motion.
+    // All pigment comes from the shared scene palette. Use its own luminance
+    // to soften saturation without rotating hues or tinting neutral covers.
     vec3 chroma=swatch/max(0.20,max(swatch.r,max(swatch.g,swatch.b)));
+    float luminance=dot(chroma,vec3(0.2126,0.7152,0.0722));
+    chroma=mix(vec3(luminance),chroma,0.68);
     vec3 flow=chroma*light*(1.0-uLowFlash*0.18)*clamp(uIntensity,0.0,2.0);
+    // Translucent light over the cover (or dark room), keeping the foreground
+    // sculpture and readouts brighter. Do not normalize away this attenuation.
+    flow*=0.48;
     vec2 screen=vec2(vUv.x,1.0-vUv.y);
     vec2 creditDistance=(screen-uCredit.xy)/max(uCredit.zw,vec2(0.02));
     float shade=exp(-dot(creditDistance,creditDistance)*1.4);
     flow*=1.0-shade*0.78;
     vec2 heroDistance=(screen-uHero.xy)/max(uHero.zw,vec2(0.02));
     float heroShade=exp(-dot(heroDistance,heroDistance)*1.25);
-    flow*=1.0-0.42*heroShade;
+    flow*=1.0-0.60*heroShade;
     vec2 coverUv=(vUv-0.5)/(1.015+uMusic.x*0.014+uMusic.w*0.009)+0.5;
     vec4 coverSample=texture(uCover,coverUv);
     // The prepared photograph carries its vignette and credit/hero protection

@@ -63,7 +63,7 @@ export function resolveRenderSeed(config: ProjectConfig, analysis: AudioAnalysis
       config.output.fps,
       config.visual.spectrumBands,
       RENDERER_VERSION,
-      ...(config.visual.engine === "milkdrop" ? ["milkdrop-1"] : []),
+      ...(config.visual.engine === "milkdrop" ? ["milkdrop-2"] : []),
     ].join(":"),
   ).slice(0, 16);
 }
