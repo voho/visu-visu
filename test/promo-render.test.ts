@@ -31,31 +31,41 @@ function artwork(): PreparedArtwork {
     palette: extractPalette(context.getImageData(0, 0, 256, 256).data) };
 }
 
-function composition(width = 640, height = 360) {
+function composition(width = 640, height = 360, text = { title: "Night Signal", artist: "voho" }) {
   const config = parseProjectConfig({ output: { width, height }, visual: { mode: "promo", imagePath: "fixture.png" },
-    text: { title: "Night Signal", artist: "voho" } });
+    text });
   const background = createCanvas(width, height), context = background.getContext("2d");
   context.fillStyle = "#363636"; context.fillRect(0, 0, width, height);
   return { renderer: new PromoRenderer(config, { width, height }, artwork()), background };
 }
 
 describe("promo composition", () => {
-  test("keeps gallery elements separate with a 68% waveform and player-safe spectrum", () => {
+  test("centers the complete airy group with golden columns and a separate 68% waveform", () => {
     for (const [width, height] of [[1920, 1080], [1080, 1920], [1080, 1080], [640, 360], [160, 640], [640, 160]]) {
       const layout = createPromoLayout(width!, height!);
-      expect(layout.cover.y + layout.cover.size / 2).toBeCloseTo(height! / 2, 7);
+      const { group, cover, text } = layout;
+      const gutter = text.x - cover.x - cover.size;
+      expect(group.x + group.width / 2).toBeCloseTo(width! / 2, 7);
+      expect(group.y + group.height / 2).toBeCloseTo(height! / 2, 7);
+      expect(cover.y).toBe(text.top);
+      expect(cover.y).toBe(group.y);
+      expect(text.width / (cover.size + gutter)).toBeCloseTo((1 + Math.sqrt(5)) / 2, 7);
+      expect(group.x).toBeGreaterThanOrEqual(width! * 0.08 - 1e-8);
+      expect(group.x + group.width).toBeLessThanOrEqual(width! * 0.92 + 1e-8);
+      expect(group.y).toBeGreaterThanOrEqual(height! * 0.06);
       expect(layout.text.centerY).toBeLessThan(height! / 2);
       expect(layout.text.artistSize).toBe(layout.text.titleSize);
       expect(layout.text.x).toBeGreaterThan(layout.cover.x + layout.cover.size);
       expect(layout.text.x + layout.text.width).toBeLessThan(width!);
       expect(layout.text.width).toBeGreaterThan(0);
-      expect(layout.cover.y + layout.cover.size).toBeLessThanOrEqual(height! * 0.7 + 1e-8);
+      expect(layout.cover.y + layout.cover.size).toBeLessThan(layout.spectrumTop);
       expect(layout.scopeX).toBe(layout.text.x);
       expect(layout.scopeWidth).toBe(layout.text.width);
       expect(layout.scopeHeight).toBeCloseTo(layout.cover.size * 0.68, 7);
       expect(layout.text.bottom).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
       expect(layout.spectrumTop).toBeGreaterThan(layout.scopeY + layout.scopeHeight / 2);
       expect(layout.spectrumBaseline - layout.spectrumTop).toBeLessThanOrEqual(height! * 0.3 + 1e-8);
+      expect(layout.spectrumBaseline - layout.spectrumTop).toBeGreaterThanOrEqual(height! * 0.12 - 1e-8);
       expect(layout.spectrumBaseline).toBe(height! * 0.94);
       const signals = promoSignalsAt(track(() => 1), 2, width!, height!);
       expect(signals.bars).toHaveLength(64);
@@ -106,21 +116,90 @@ describe("promo composition", () => {
     expect(maximumDifference).toBeLessThanOrEqual(1);
   });
 
-  test("fits enlarged and wrapped credits above the waveform on landscape and portrait frames", () => {
-    for (const [width, height] of [[1920, 1080], [1080, 1920], [640, 360]]) {
+  test("fits measured credits together while preserving top alignment and the centered visible union", () => {
+    for (const [width, height] of [[1920, 1080], [1080, 1920], [1080, 1080], [640, 360], [160, 640], [640, 160]]) {
       for (const text of [
         { title: "Event Horizon", artist: "voho" },
         { title: "A Quiet Journey Beyond the Event Horizon", artist: "The Midnight Orchestra" },
+        { title: "jazz Écho", artist: "juno & friends" },
       ]) {
-        const config = parseProjectConfig({ output: { width, height },
-          visual: { mode: "promo", imagePath: "fixture.png" }, text });
-        const renderer = new PromoRenderer(config, { width: width!, height: height! }, artwork());
+        const { renderer } = composition(width!, height!, text);
         const { creditBounds: bounds, layout } = renderer;
-        expect(bounds.x).toBeGreaterThan(layout.cover.x + layout.cover.size);
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width! * 0.92 + 1e-5);
-        expect(bounds.y).toBeGreaterThanOrEqual(layout.text.top);
-        expect(bounds.y + bounds.height).toBeLessThanOrEqual(layout.text.bottom + 1e-5);
+        const cover = layout.cover;
+        const left = Math.min(cover.x, bounds.x, layout.scopeX);
+        const right = Math.max(cover.x + cover.size, bounds.x + bounds.width, layout.scopeX + layout.scopeWidth);
+        const top = Math.min(cover.y, bounds.y, layout.scopeY - layout.scopeHeight / 2);
+        const bottom = Math.max(cover.y + cover.size, bounds.y + bounds.height, layout.scopeY + layout.scopeHeight / 2);
+        expect((left + right) / 2).toBeCloseTo(width! / 2, 7);
+        expect((top + bottom) / 2).toBeCloseTo(height! / 2, 7);
+        expect(bounds.y).toBe(cover.y);
+        expect(bounds.y).toBe(layout.text.top);
+        expect(bounds.x).toBe(layout.scopeX);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.scopeX + layout.scopeWidth + 1e-5);
         expect(bounds.y + bounds.height).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
+        expect(bottom).toBeLessThan(layout.spectrumTop);
+        expect(layout.text.titleSize).toBe(layout.text.artistSize);
+        expect(layout.text.titleSize).toBeLessThanOrEqual(createPromoLayout(width!, height!).text.titleSize);
+        expect(cover.size).toBe(createPromoLayout(width!, height!).cover.size);
+        expect(layout.spectrumBaseline - layout.spectrumTop).toBeGreaterThanOrEqual(height! * 0.12 - 1e-5);
+        const signals = promoSignalsAt(track(() => 1, true), 2, width!, height!, layout);
+        for (const point of signals.traces[0]!) {
+          expect(point.x).toBeGreaterThanOrEqual(layout.scopeX);
+          expect(point.x).toBeLessThanOrEqual(layout.scopeX + layout.scopeWidth + 1e-5);
+          expect(point.y).toBeGreaterThanOrEqual(layout.scopeY - layout.scopeHeight / 2 - 1e-5);
+          expect(point.y).toBeLessThanOrEqual(layout.scopeY + layout.scopeHeight / 2 + 1e-5);
+        }
+      }
+    }
+  });
+
+  test("preserves the approved cover and equal title/artist font sizes for short song names", () => {
+    for (const title of ["Bad Boys", "Event Horizon", "Night Blur"]) {
+      const { renderer } = composition(1920, 1080, { title, artist: "voho" });
+      expect(renderer.layout.cover.size).toBe(432);
+      expect(renderer.layout.text.titleSize).toBeCloseTo(113.4, 8);
+      expect(renderer.layout.text.artistSize).toBeCloseTo(113.4, 8);
+    }
+  });
+
+  test("aligns actual painted title ink with the cover top and corrects credit left bearings", () => {
+    const width = 640, height = 360;
+    for (const text of [
+      { title: "Night Blur", artist: "voho" },
+      { title: "jazz Écho", artist: "voho" },
+      { title: "A Quiet Journey Beyond the Event Horizon", artist: "The Midnight Orchestra" },
+    ]) {
+      const { renderer, background } = composition(width, height, text);
+      const pixels = renderer.render(track(() => 0), 2, background);
+      const { layout, creditBounds } = renderer;
+      let left = width, top = height, right = -1, bottom = -1;
+      for (let y = Math.floor(creditBounds.y) - 2; y < Math.ceil(creditBounds.y + creditBounds.height) + 2; y++) {
+        for (let x = Math.floor(layout.text.x) - 2; x < Math.ceil(layout.text.x + layout.text.width) + 2; x++) {
+          const index = (y * width + x) * 4;
+          if (Math.min(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!) <= 180) continue;
+          left = Math.min(left, x); right = Math.max(right, x);
+          top = Math.min(top, y); bottom = Math.max(bottom, y);
+        }
+      }
+      expect(right).toBeGreaterThan(left);
+      expect(bottom).toBeGreaterThan(top);
+      expect(Math.abs(top - layout.cover.y)).toBeLessThan(1.5);
+      expect(Math.abs(left - layout.scopeX)).toBeLessThan(1.5);
+      expect(bottom).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
+      if (text.artist === "voho") {
+        const context = createCanvas(1, 1).getContext("2d");
+        context.font = '500 37.8px "Promo Sans"';
+        context.letterSpacing = `${37.8 * 0.09}px`;
+        const expected = context.measureText("voho");
+        const expectedHeight = expected.actualBoundingBoxAscent + expected.actualBoundingBoxDescent;
+        let artistTop = height;
+        for (let y = Math.floor(creditBounds.y + creditBounds.height - expectedHeight) - 2; y <= bottom; y++) {
+          for (let x = Math.floor(layout.text.x); x < Math.ceil(layout.text.x + layout.text.width); x++) {
+            const index = (y * width + x) * 4;
+            if (Math.min(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!) > 180) artistTop = Math.min(artistTop, y);
+          }
+        }
+        expect(Math.abs((bottom - artistTop + 1) - expectedHeight)).toBeLessThan(2);
       }
     }
   });

@@ -10,6 +10,7 @@ import { accentSwatches, liftSwatch, paletteRgb, rgbCss, type ScenePalette } fro
 import { spectrumReadoutAt, SPECTRUM_STRIP_BANDS } from "./spectrum-readout.js";
 
 export interface PromoLayout {
+  group: { x: number; y: number; width: number; height: number };
   cover: { x: number; y: number; size: number };
   text: { x: number; width: number; centerY: number; top: number; bottom: number; titleSize: number; artistSize: number };
   scopeX: number;
@@ -22,29 +23,36 @@ export interface PromoLayout {
   spectrumBaseline: number;
 }
 
-/** Golden gallery: a centered cover, separate credits/waveform, and player-safe spectrum. */
-export function createPromoLayout(width: number, height: number): PromoLayout {
-  const phi = (1 + Math.sqrt(5)) / 2;
+const PHI = (1 + Math.sqrt(5)) / 2;
+
+/** Airy golden columns, centered as a group after the credits' ink is measured. */
+export function createPromoLayout(width: number, height: number,
+  credits?: { height: number; fontSize: number }): PromoLayout {
   const landscape = width / height >= 1.2;
-  const size = Math.min(width * (landscape ? 0.28 : 0.36), height * 0.40);
-  const x = width * 0.08;
-  // The golden column needs a cover-width fallback on portrait and square frames.
-  const textX = Math.max(width / phi ** 2, x + size + width * 0.055);
-  const textWidth = width * 0.92 - textX;
-  const safeTop = height * 0.06, safeBottom = height * 0.94;
-  const safeHeight = safeBottom - safeTop;
-  const scopeY = safeTop + safeHeight / phi;
+  const columnRatio = (1 + 1 / PHI ** 2) * (1 + PHI);
+  const size = Math.min(height * 0.40, width * 0.84 / columnRatio);
+  const coverGap = size / PHI ** 2;
+  const textWidth = (size + coverGap) * PHI;
+  const groupWidth = size + coverGap + textWidth;
+  const x = (width - groupWidth) / 2;
+  const textX = x + size + coverGap;
+  const fontSize = credits?.fontSize ?? Math.min(height * 0.105, width * (landscape ? 0.062 : 0.070));
+  const creditHeight = credits?.height ?? fontSize * 1.8 + fontSize / PHI ** 2;
+  const scopeGap = fontSize / PHI ** 4;
   const scopeHeight = size * 0.68;
-  const gap = height * 0.022;
-  const titleSize = Math.min(height * 0.105, width * (landscape ? 0.062 : 0.070));
+  const groupHeight = Math.max(size, creditHeight + scopeGap + scopeHeight);
+  const top = (height - groupHeight) / 2;
+  const scopeY = top + creditHeight + scopeGap + scopeHeight / 2;
+  const spectrumBaseline = height * 0.94;
   return {
-    cover: { x, y: (height - size) / 2, size },
-    text: { x: textX, width: textWidth, centerY: safeTop + safeHeight / phi ** 2,
-      top: safeTop, bottom: scopeY - scopeHeight / 2 - gap, titleSize, artistSize: titleSize },
+    group: { x, y: top, width: groupWidth, height: groupHeight },
+    cover: { x, y: top, size },
+    text: { x: textX, width: textWidth, centerY: top + creditHeight / 2,
+      top, bottom: top + creditHeight, titleSize: fontSize, artistSize: fontSize },
     scopeX: textX, scopeY, scopeWidth: textWidth, scopeHeight,
-    spectrumX: x, spectrumWidth: width - x * 2,
-    spectrumTop: Math.max(scopeY + scopeHeight / 2 + gap, safeBottom - height * 0.3),
-    spectrumBaseline: safeBottom,
+    spectrumX: width * 0.08, spectrumWidth: width * 0.84,
+    spectrumTop: Math.max(top + groupHeight + scopeGap, spectrumBaseline - height * 0.3),
+    spectrumBaseline,
   };
 }
 
@@ -59,25 +67,60 @@ function registerFonts(): void {
   fontsReady = true;
 }
 
-interface TextBlock { lines: string[]; size: number; lineHeight: number; font: string; spacing: number }
-function textBlock(context: SKRSContext2D, text: string, width: number, size: number, family: string, weight: number, spacing: number): TextBlock {
-  const clean = text.normalize("NFC").replace(/\s+/g, " ").trim();
-  const words = clean.split(" ");
+interface TextLine { value: string; left: number; right: number; ascent: number; descent: number }
+interface TextBlock {
+  lines: TextLine[]; size: number; lineHeight: number; font: string; spacing: number;
+  top: number; height: number; width: number;
+}
+
+function textBlock(context: SKRSContext2D, text: string, width: number, size: number,
+  family: string, weight: number, spacing: number): TextBlock {
+  const words = text.normalize("NFC").replace(/\s+/g, " ").trim().split(" ");
+  context.textAlign = "left"; context.textBaseline = "alphabetic";
   for (;;) {
     context.font = `${weight} ${size}px "${family}"`;
     context.letterSpacing = `${size * spacing}px`;
-    const lines: string[] = [];
+    const measure = (value: string): TextLine => {
+      const ink = context.measureText(value);
+      return { value, left: ink.actualBoundingBoxLeft, right: ink.actualBoundingBoxRight,
+        ascent: ink.actualBoundingBoxAscent, descent: ink.actualBoundingBoxDescent };
+    };
+    const lines: TextLine[] = [];
     let line = "";
     for (const word of words) {
       const next = line ? `${line} ${word}` : word;
-      if (line && context.measureText(next).width > width) { lines.push(line); line = word; }
+      const ink = measure(next);
+      if (line && ink.left + ink.right > width) { lines.push(measure(line)); line = word; }
       else line = next;
     }
-    if (line) lines.push(line);
-    if ((lines.length <= 2 && lines.every(value => context.measureText(value).width <= width)) || size <= 1) {
-      return { lines, size, lineHeight: size * 1.02, font: context.font, spacing: size * spacing };
+    if (line) lines.push(measure(line));
+    const inkWidth = Math.max(...lines.map(ink => ink.left + ink.right));
+    if ((lines.length <= 2 && inkWidth <= width) || size <= 1) {
+      const lineHeight = Math.max(size * 1.08, ...lines.map(ink => (ink.ascent + ink.descent) * 1.08));
+      const top = Math.min(...lines.map((ink, index) => index * lineHeight - ink.ascent));
+      const bottom = Math.max(...lines.map((ink, index) => index * lineHeight + ink.descent));
+      return { lines, size, lineHeight, font: context.font, spacing: size * spacing,
+        top, height: bottom - top, width: inkWidth };
     }
     size *= 0.94;
+  }
+}
+
+function fitCredits(context: SKRSContext2D, text: ProjectConfig["text"], width: number, height: number) {
+  const initial = createPromoLayout(width, height);
+  let fontSize = initial.text.titleSize;
+  for (;;) {
+    const title = textBlock(context, text.title, initial.text.width, fontSize, "Promo Serif", 600, 0);
+    const artist = textBlock(context, text.artist, initial.text.width, fontSize, "Promo Sans", 500, 0.09);
+    const commonSize = Math.min(title.size, artist.size);
+    if (commonSize < fontSize) { fontSize = commonSize; continue; }
+    const gap = fontSize / PHI ** 2;
+    const layout = createPromoLayout(width, height, { height: title.height + gap + artist.height, fontSize });
+    // Reserve at least 12% for the analyzer beneath the centered group. Wrapped
+    // credits shrink together; the cover and the scope retain their sizes.
+    if ((layout.spectrumBaseline - layout.spectrumTop >= height * 0.12
+      && layout.group.y >= height * 0.06) || fontSize <= 1) return { title, artist, gap, layout };
+    fontSize *= 0.94;
   }
 }
 
@@ -87,8 +130,8 @@ export interface PromoSignalFrame {
 }
 
 /** Seek-independent envelopes retain the analyser's smooth attacks and falling peaks. */
-export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: number, height: number): PromoSignalFrame {
-  const layout = createPromoLayout(width, height);
+export function promoSignalsAt(analysis: AudioAnalysis, time: number, width: number, height: number,
+  layout = createPromoLayout(width, height)): PromoSignalFrame {
   const { levels, peaks } = spectrumReadoutAt(analysis, time, "promo");
   const pitch = layout.spectrumWidth / SPECTRUM_STRIP_BANDS;
   const barWidth = pitch * 0.68;
@@ -135,14 +178,15 @@ export class PromoRenderer {
     registerFonts();
     this.canvas = createCanvas(size.width, size.height);
     this.context = this.canvas.getContext("2d");
-    this.layout = createPromoLayout(size.width, size.height);
     this.palette = artwork.palette;
     this.scopePhase = accentSwatches(this.palette).cool / this.palette.colors.length * 360;
     this.lockup = createCanvas(size.width, size.height);
-    this.creditBounds = this.paintLockup(config, artwork.thumbnail);
+    const credits = fitCredits(this.lockup.getContext("2d"), config.text, size.width, size.height);
+    this.layout = credits.layout;
+    this.creditBounds = this.paintLockup(credits, artwork.thumbnail);
   }
 
-  private paintLockup(config: ProjectConfig, thumbnail: Canvas): PromoRenderer["creditBounds"] {
+  private paintLockup(credits: ReturnType<typeof fitCredits>, thumbnail: Canvas): PromoRenderer["creditBounds"] {
     const context = this.lockup.getContext("2d"), { cover, text } = this.layout;
     const scale = Math.min(this.canvas.width, this.canvas.height) / 1080;
     const radius = cover.size * 0.022;
@@ -161,41 +205,20 @@ export class PromoRenderer {
     context.lineWidth = Math.max(0.5, scale);
     context.beginPath(); context.roundRect(cover.x, cover.y, cover.size, cover.size, radius); context.stroke();
 
-    // Actual ink metrics center both lines as a group, not their font em boxes.
-    const metrics = (block: TextBlock) => {
-      context.font = block.font; context.letterSpacing = `${block.spacing}px`;
-      const measured = block.lines.map(line => context.measureText(line));
-      const ascent = Math.max(...measured.map(value => value.actualBoundingBoxAscent));
-      const descent = Math.max(...measured.map(value => value.actualBoundingBoxDescent));
-      return { ascent, height: ascent + descent + (block.lines.length - 1) * block.lineHeight,
-        width: Math.max(...measured.map(value => value.width)) };
-    };
-    let fontSize = text.titleSize;
-    let title: TextBlock, artist: TextBlock, gap: number;
-    for (;;) {
-      title = textBlock(context, config.text.title, text.width, fontSize, "Promo Serif", 600, 0);
-      artist = textBlock(context, config.text.artist, text.width, fontSize, "Promo Sans", 500, 0.09);
-      const commonSize = Math.min(title.size, artist.size);
-      if (commonSize < fontSize) { fontSize = commonSize; continue; }
-      gap = Math.min(this.canvas.height * 0.033, fontSize * 0.38);
-      if (metrics(title).height + gap + metrics(artist).height <= text.bottom - text.top || fontSize <= 1) break;
-      fontSize *= 0.94;
-    }
-    const titleMetrics = metrics(title), artistMetrics = metrics(artist);
-    const creditHeight = titleMetrics.height + gap + artistMetrics.height;
-    // A larger byline or wrapped title can extend past the golden anchor. Lift
-    // that group just enough to preserve the waveform's full dynamic range.
-    const top = Math.max(text.top, Math.min(text.centerY - creditHeight / 2, text.bottom - creditHeight));
-    const draw = (block: TextBlock, baseline: number, color: string) => {
+    const { title, artist, gap } = credits;
+    const draw = (block: TextBlock, top: number, color: string) => {
       context.font = block.font; context.letterSpacing = `${block.spacing}px`;
       context.textAlign = "left"; context.textBaseline = "alphabetic";
       context.fillStyle = color; context.shadowColor = "rgba(0,0,0,0.95)";
       context.shadowBlur = 24 * scale; context.shadowOffsetY = 4 * scale;
-      block.lines.forEach((line, index) => context.fillText(line, text.x, baseline + index * block.lineHeight));
+      // Correct each line's bearing so its visible left edge shares the scope
+      // edge; baseline offsets align the visible title top with the cover top.
+      block.lines.forEach((line, index) => context.fillText(line.value,
+        text.x + line.left, top - block.top + index * block.lineHeight));
     };
-    draw(title, top + titleMetrics.ascent, "#fafafa");
-    draw(artist, top + titleMetrics.height + gap + artistMetrics.ascent, "#e8e8e8");
-    return { x: text.x, y: top, width: Math.max(titleMetrics.width, artistMetrics.width), height: creditHeight };
+    draw(title, text.top, "#fafafa");
+    draw(artist, text.top + title.height + gap, "#e8e8e8");
+    return { x: text.x, y: text.top, width: Math.max(title.width, artist.width), height: text.bottom - text.top };
   }
 
   render(analysis: AudioAnalysis, time: number, background: Canvas): Buffer {
@@ -205,7 +228,7 @@ export class PromoRenderer {
     // Darken only the animated room; the cover retains its original exposure.
     context.fillStyle = "rgba(0,0,0,0.28)";
     context.fillRect(0, 0, width, height);
-    const signals = promoSignalsAt(analysis, time, width, height);
+    const signals = promoSignalsAt(analysis, time, width, height, this.layout);
     this.drawScope(signals);
     this.drawSpectrum(signals);
     context.drawImage(this.lockup, 0, 0);

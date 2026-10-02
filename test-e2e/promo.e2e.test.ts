@@ -113,7 +113,7 @@ describe("promo mode end to end", () => {
     }
   }, 100_000);
 
-  test("renders the Golden gallery with equally prominent credits, live MilkDrop and a reserved spectrum band", async () => {
+  test("renders the centered Airy composition with aligned cover and credits, live MilkDrop and a reserved spectrum band", async () => {
     const output = join(directory, "promo.mp4");
     // This deliberately omits --engine and --milkdrop-presets: promo must select
     // the real immersive engine itself. No user media or browser mocks are used.
@@ -176,17 +176,22 @@ describe("promo mode end to end", () => {
     }
     const dense = (counts: Uint16Array) => [...counts.keys()].filter(index => counts[index]! >= 12);
     const coverX = dense(columns), coverY = dense(rows);
+    const coverWidth = coverX.at(-1)! - coverX[0]! + 1;
+    const coverHeight = coverY.at(-1)! - coverY[0]! + 1;
     expect(coverX.length).toBeGreaterThan(110);
     expect(coverY.length).toBeGreaterThan(110);
+    expect(Math.abs(coverWidth - height * 0.4)).toBeLessThan(3);
+    expect(Math.abs(coverHeight - height * 0.4)).toBeLessThan(3);
     expect(coverX[0]).toBeGreaterThanOrEqual(30);
     expect(coverX.at(-1)!).toBeLessThan(width * 0.4);
-    expect(Math.abs((coverY[0]! + coverY.at(-1)!) / 2 - height / 2)).toBeLessThan(4);
+    expect(coverY[0]!).toBeGreaterThan(height * 0.06);
     expect(mean(frame, { left: coverX[0]! + 10, right: coverX.at(-1)! - 10,
       top: coverY[0]! + 10, bottom: coverY.at(-1)! - 10 })).toBeGreaterThan(100);
 
-    // Gallery keeps the two credit lines above the separate right-hand scope.
-    // Identify their actual encoded ink, independent of the layout helper.
-    const bands = inkBands(frame, { left: coverX.at(-1)! + 12, right: width - 25, top: 75, bottom: 172 });
+    // Airy places the actual top of the title ink at the cover's top edge.
+    // Identify the encoded glyphs independently of the renderer's layout API.
+    const bands = inkBands(frame, { left: coverX.at(-1)! + 12, right: width - 25,
+      top: Math.max(0, coverY[0]! - 3), bottom: Math.ceil(coverY[0]! + coverHeight * 0.6) });
     expect(bands).toHaveLength(2);
     const title = bands[0]!, artist = bands[1]!;
     const titleHeight = title.bottom - title.top, artistHeight = artist.bottom - artist.top;
@@ -198,14 +203,30 @@ describe("promo mode end to end", () => {
     expect(artistHeight / titleHeight).toBeLessThan(1.5);
     expect(artist.right - artist.left).toBeGreaterThan(90);
     expect(Math.abs(title.left - artist.left)).toBeLessThan(4);
-    expect(title.top).toBeGreaterThan(height * 0.24);
-    expect(artist.bottom).toBeLessThan(height * 0.46);
+    expect(Math.abs(title.top - coverY[0]!)).toBeLessThan(3);
     expect(artist.top - title.bottom).toBeGreaterThan(7);
+
+    // Recover the requested golden proportions from the measured cover and
+    // text rather than importing the production geometry. The right column
+    // contains these credits plus a waveform room 68% of the cover height.
+    const phi = (1 + Math.sqrt(5)) / 2;
+    const gutter = title.left - (coverX.at(-1)! + 1);
+    expect(Math.abs(gutter - coverWidth / phi ** 2)).toBeLessThan(4);
+    const columnWidth = (coverWidth + gutter) * phi;
+    const groupRight = title.left + columnWidth;
+    expect(Math.abs((coverX[0]! + groupRight) / 2 - width / 2)).toBeLessThan(4);
+    expect(groupRight).toBeLessThan(width * 0.94);
+    const fontSize = height * 0.105;
+    expect(Math.abs(artist.top - title.bottom - fontSize / phi ** 2)).toBeLessThan(4);
+    const scopeTop = artist.bottom + fontSize / phi ** 4;
+    const groupBottom = scopeTop + coverHeight * 0.68;
+    expect(Math.abs((title.top + groupBottom) / 2 - height / 2)).toBeLessThan(4);
+    expect(groupBottom).toBeLessThan(height * 0.8);
 
     // Away from cover, text, oscilloscope and bars, actual background pixels
     // must animate while keeping their luminance below the foreground cover.
     const background = await bytes(["-ss", "0.5", "-i", output, "-t", "2", "-map", "0:v:0",
-      "-vf", "crop=600:70:20:20,scale=160:20:flags=area", "-fps_mode", "passthrough",
+      "-vf", "crop=600:50:20:20,scale=160:20:flags=area", "-fps_mode", "passthrough",
       "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]);
     const plane = 160 * 20 * 3;
     expect(background.length).toBe(2 * fps * plane);
