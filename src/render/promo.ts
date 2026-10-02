@@ -82,7 +82,9 @@ function textBlock(context: SKRSContext2D, text: string, width: number, size: nu
     context.letterSpacing = `${size * spacing}px`;
     const measure = (value: string): TextLine => {
       const ink = context.measureText(value);
-      return { value, left: ink.actualBoundingBoxLeft, right: ink.actualBoundingBoxRight,
+      // The pinned Canvas runtime includes tracking in its reported left
+      // bearing even though fillText does not paint it before the first glyph.
+      return { value, left: ink.actualBoundingBoxLeft - size * spacing, right: ink.actualBoundingBoxRight,
         ascent: ink.actualBoundingBoxAscent, descent: ink.actualBoundingBoxDescent };
     };
     const lines: TextLine[] = [];
@@ -211,14 +213,16 @@ export class PromoRenderer {
       context.textAlign = "left"; context.textBaseline = "alphabetic";
       context.fillStyle = color; context.shadowColor = "rgba(0,0,0,0.95)";
       context.shadowBlur = 24 * scale; context.shadowOffsetY = 4 * scale;
-      // Correct each line's bearing so its visible left edge shares the scope
-      // edge; baseline offsets align the visible title top with the cover top.
+      // Center each line's visible ink on the scope axis, including its bearing;
+      // baseline offsets align the visible title top with the cover top.
       block.lines.forEach((line, index) => context.fillText(line.value,
-        text.x + line.left, top - block.top + index * block.lineHeight));
+        text.x + (text.width - line.left - line.right) / 2 + line.left,
+        top - block.top + index * block.lineHeight));
     };
     draw(title, text.top, "#fafafa");
     draw(artist, text.top + title.height + gap, "#e8e8e8");
-    return { x: text.x, y: text.top, width: Math.max(title.width, artist.width), height: text.bottom - text.top };
+    const width = Math.max(title.width, artist.width);
+    return { x: text.x + (text.width - width) / 2, y: text.top, width, height: text.bottom - text.top };
   }
 
   render(analysis: AudioAnalysis, time: number, background: Canvas): Buffer {

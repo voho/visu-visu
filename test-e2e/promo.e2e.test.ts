@@ -202,7 +202,9 @@ describe("promo mode end to end", () => {
     expect(artistHeight / titleHeight).toBeGreaterThan(0.8);
     expect(artistHeight / titleHeight).toBeLessThan(1.5);
     expect(artist.right - artist.left).toBeGreaterThan(90);
-    expect(Math.abs(title.left - artist.left)).toBeLessThan(4);
+    const titleCenter = (title.left + title.right) / 2;
+    const artistCenter = (artist.left + artist.right) / 2;
+    expect(Math.abs(titleCenter - artistCenter)).toBeLessThan(4);
     expect(Math.abs(title.top - coverY[0]!)).toBeLessThan(3);
     expect(artist.top - title.bottom).toBeGreaterThan(7);
 
@@ -210,10 +212,16 @@ describe("promo mode end to end", () => {
     // text rather than importing the production geometry. The right column
     // contains these credits plus a waveform room 68% of the cover height.
     const phi = (1 + Math.sqrt(5)) / 2;
-    const gutter = title.left - (coverX.at(-1)! + 1);
-    expect(Math.abs(gutter - coverWidth / phi ** 2)).toBeLessThan(4);
+    const gutter = coverWidth / phi ** 2;
+    const columnLeft = coverX.at(-1)! + 1 + gutter;
     const columnWidth = (coverWidth + gutter) * phi;
-    const groupRight = title.left + columnWidth;
+    // Checkerboard edge pixels can disappear in H.264. Use symmetric outer
+    // margins for this axis so the square's width error is not amplified by φ.
+    const centeredWidth = width - coverX[0]! * 2;
+    const columnCenter = width - coverX[0]! - centeredWidth / phi / 2;
+    expect(Math.abs(titleCenter - columnCenter)).toBeLessThan(4);
+    expect(Math.abs(artistCenter - columnCenter)).toBeLessThan(4);
+    const groupRight = columnLeft + columnWidth;
     expect(Math.abs((coverX[0]! + groupRight) / 2 - width / 2)).toBeLessThan(4);
     expect(groupRight).toBeLessThan(width * 0.94);
     const fontSize = height * 0.105;

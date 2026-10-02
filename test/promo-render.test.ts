@@ -134,7 +134,8 @@ describe("promo composition", () => {
         expect((top + bottom) / 2).toBeCloseTo(height! / 2, 7);
         expect(bounds.y).toBe(cover.y);
         expect(bounds.y).toBe(layout.text.top);
-        expect(bounds.x).toBe(layout.scopeX);
+        expect(bounds.x).toBeGreaterThanOrEqual(layout.scopeX);
+        expect(bounds.x + bounds.width / 2).toBeCloseTo(layout.scopeX + layout.scopeWidth / 2, 7);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.scopeX + layout.scopeWidth + 1e-5);
         expect(bounds.y + bounds.height).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
         expect(bottom).toBeLessThan(layout.spectrumTop);
@@ -162,7 +163,7 @@ describe("promo composition", () => {
     }
   });
 
-  test("aligns actual painted title ink with the cover top and corrects credit left bearings", () => {
+  test("centers every painted credit line on the waveform while keeping title ink aligned with the cover top", () => {
     const width = 640, height = 360;
     for (const text of [
       { title: "Night Blur", artist: "voho" },
@@ -173,18 +174,36 @@ describe("promo composition", () => {
       const pixels = renderer.render(track(() => 0), 2, background);
       const { layout, creditBounds } = renderer;
       let left = width, top = height, right = -1, bottom = -1;
+      const bands: Array<{ left: number; right: number; top: number; bottom: number }> = [];
       for (let y = Math.floor(creditBounds.y) - 2; y < Math.ceil(creditBounds.y + creditBounds.height) + 2; y++) {
+        let rowLeft = width, rowRight = -1;
         for (let x = Math.floor(layout.text.x) - 2; x < Math.ceil(layout.text.x + layout.text.width) + 2; x++) {
           const index = (y * width + x) * 4;
           if (Math.min(pixels[index]!, pixels[index + 1]!, pixels[index + 2]!) <= 180) continue;
           left = Math.min(left, x); right = Math.max(right, x);
           top = Math.min(top, y); bottom = Math.max(bottom, y);
+          rowLeft = Math.min(rowLeft, x); rowRight = Math.max(rowRight, x);
         }
+        if (rowRight < rowLeft) continue;
+        const previous = bands.at(-1);
+        if (previous && y - previous.bottom <= 2) {
+          previous.bottom = y + 1;
+          previous.left = Math.min(previous.left, rowLeft);
+          previous.right = Math.max(previous.right, rowRight);
+        } else bands.push({ left: rowLeft, right: rowRight, top: y, bottom: y + 1 });
       }
       expect(right).toBeGreaterThan(left);
       expect(bottom).toBeGreaterThan(top);
       expect(Math.abs(top - layout.cover.y)).toBeLessThan(1.5);
-      expect(Math.abs(left - layout.scopeX)).toBeLessThan(1.5);
+      const scopeCenter = layout.scopeX + layout.scopeWidth / 2;
+      expect(Math.abs((left + right) / 2 - scopeCenter)).toBeLessThan(1.5);
+      // Ignore detached accent/dot fragments; each full line, including wrapped
+      // title/artist lines of different lengths, must share the waveform axis.
+      const lines = bands.filter(band => band.bottom - band.top >= layout.text.titleSize * 0.35);
+      expect(lines.length).toBeGreaterThanOrEqual(text.artist === "voho" ? 2 : 3);
+      for (const line of lines) {
+        expect(Math.abs((line.left + line.right) / 2 - scopeCenter)).toBeLessThan(1.5);
+      }
       expect(bottom).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
       if (text.artist === "voho") {
         const context = createCanvas(1, 1).getContext("2d");
