@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG, parseProjectConfig } from "../src/config.js";
 import { resolveRenderSeed } from "../src/render/render.js";
 import { VisualizerRenderer, type RenderStage } from "../src/render/renderer.js";
 import { ANALYSIS_VERSION, type AudioAnalysis } from "../src/types.js";
+import { MILKDROP_DEFAULT_PRESET_IDS, milkdropPreset } from "../src/milkdrop/presets.js";
 
 function analysis(): AudioAnalysis {
   const fps = 30, duration = 12;
@@ -24,6 +25,40 @@ function analysis(): AudioAnalysis {
 }
 
 describe("MilkDrop engine selection and composition", () => {
+  test("validates ordered preset playlists from JSON and CLI without changing automatic defaults", () => {
+    expect(parseProjectConfig({}).visual.milkdropPresets).toEqual([]);
+    expect(MILKDROP_DEFAULT_PRESET_IDS).toEqual(["vortex", "ribbons", "cosmic-dust", "fog-tunnel", "julia-fractal", "plasma", "folded-tunnel", "moebius"]);
+    const custom = overrideConfig(DEFAULT_CONFIG, { engine: "milkdrop", milkdropPresets: "tunnel-race, mandelbox-explorer" });
+    expect(custom.visual.milkdropPresets).toEqual(["tunnel-race", "mandelbox-explorer"]);
+    expect(parseProjectConfig(custom)).toEqual(custom);
+    for (const value of [null, "tunnel-race", [1], [""], ["unknown"], ["vortex", "vortex"], ["vortex", " vortex "]]) {
+      expect(() => parseProjectConfig({ visual: { milkdropPresets: value } })).toThrow();
+    }
+    for (const milkdropPresets of ["", "tunnel-race,", "not-a-preset", "vortex,vortex"]) {
+      expect(() => overrideConfig(DEFAULT_CONFIG, { milkdropPresets })).toThrow();
+    }
+    for (const id of ["tunnel-race", "mandelbox-explorer", "fractal-descent"]) {
+      const first = milkdropPreset(id);
+      const next = milkdropPreset(id);
+      expect(first).toEqual(next);
+      expect(first).not.toBe(next);
+      expect(typeof first.comp).toBe("string");
+    }
+  });
+
+  test("binds automatic MilkDrop seeds to playlist order without changing explicit seeds", () => {
+    const source = analysis();
+    const base = overrideConfig(DEFAULT_CONFIG, { engine: "milkdrop" });
+    const legacy = structuredClone(base);
+    delete legacy.visual.milkdropPresets;
+    expect(resolveRenderSeed(base, source)).toBe(resolveRenderSeed(legacy, source));
+    const first = overrideConfig(base, { milkdropPresets: "tunnel-race,mandelbox-explorer" });
+    const reverse = overrideConfig(base, { milkdropPresets: "mandelbox-explorer,tunnel-race" });
+    expect(resolveRenderSeed(first, source)).not.toBe(resolveRenderSeed(base, source));
+    expect(resolveRenderSeed(first, source)).not.toBe(resolveRenderSeed(reverse, source));
+    expect(resolveRenderSeed(overrideConfig(first, { seed: "pavana" }), source)).toBe("pavana");
+  });
+
   test("keeps resonance as the default and validates explicit JSON or CLI engine selection", () => {
     expect(DEFAULT_CONFIG.visual.engine).toBe("resonance");
     expect(parseProjectConfig({}).visual.engine).toBe("resonance");

@@ -52,6 +52,7 @@ export function planMilkdrop(
   totalFrames: number,
   fps: number,
   presetNames: string[],
+  ordered = false,
 ): MilkdropPlan {
   if (!Number.isFinite(start) || start < 0) throw new Error("MilkDrop start must be finite and nonnegative.");
   if (!Number.isSafeInteger(totalFrames) || totalFrames < 1) throw new Error("MilkDrop output requires a positive whole frame count.");
@@ -71,6 +72,7 @@ export function planMilkdrop(
   let previous: string | undefined;
   const choosePreset = (frame: AnalysisFrame | undefined, energy: number): string => {
     if (!remaining.length) remaining = presets.slice();
+    if (ordered) return remaining.shift()!;
     let winner = 0, best = -Infinity;
     for (let index = 0; index < remaining.length; index++) {
       const name = remaining[index]!;

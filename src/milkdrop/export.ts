@@ -11,7 +11,7 @@ import { createSafeLayout, creditLockupEllipse } from "../render/layout.js";
 import { randomPalette } from "../render/palette.js";
 import { deriveMusicMotion } from "../render/music-motion.js";
 import { deriveSceneDynamics } from "../render/scene-dynamics.js";
-import { MILKDROP_PRESETS } from "./presets.js";
+import { MILKDROP_DEFAULT_PRESET_IDS, MILKDROP_PRESETS } from "./presets.js";
 import { planMilkdrop } from "./plan.js";
 import { launchMilkdropChrome } from "./chrome.js";
 
@@ -63,7 +63,9 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
   const executablePath = milkdropBrowserPath();
   const { duration, totalFrames, seed, renderSize, artwork } = prepared;
   const { width, height } = renderSize, fps = request.config.output.fps;
-  const plan = planMilkdrop(analysis, seed, request.start, totalFrames, fps, MILKDROP_PRESETS.map(preset => preset.id));
+  const selected = request.config.visual.milkdropPresets ?? [];
+  const plan = planMilkdrop(analysis, seed, request.start, totalFrames, fps,
+    selected.length ? selected : [...MILKDROP_DEFAULT_PRESET_IDS], selected.length > 0);
   const build = await Bun.build({ entrypoints: [resolve(import.meta.dir, "browser.js")], target: "browser", minify: true });
   if (!build.success || !build.outputs[0]) throw new Error(`Could not build MilkDrop runtime: ${build.logs.join("\n")}`);
   const [script, pcm] = await Promise.all([build.outputs[0].arrayBuffer(),
@@ -136,6 +138,7 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
       ...(request.fadeOutSeconds === undefined ? {} : { fadeOutSeconds: request.fadeOutSeconds }),
       frameCount: totalFrames, inputWidth: width, inputHeight: height, overwrite: request.overwrite });
     console.log(`MilkDrop ${plan.schedule.map(item => `${Math.max(0, (item.frame - plan.outputStartFrame) / fps).toFixed(1)}s ${item.preset}`).join(" → ")}`);
+    if (selected.length) console.log(`Presets  ${selected.map(id => MILKDROP_PRESETS.find(preset => preset.id === id)!.name).join(" → ")}`);
     startedAt = performance.now();
     await browser.evaluate("window.milkdrop.renderAll()");
     if (received !== totalFrames) throw new Error(`MilkDrop produced ${received} of ${totalFrames} frames`);

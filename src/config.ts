@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ProjectConfig } from "./types.js";
+import { MILKDROP_PRESETS } from "./milkdrop/presets.js";
 
 export const DEFAULT_CONFIG: ProjectConfig = {
   version: 1,
@@ -20,6 +21,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
   },
   visual: {
     engine: "resonance",
+    milkdropPresets: [],
     imagePath: "",
     lighting: 0.65,
     seed: "auto",
@@ -128,6 +130,19 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
   if (engine !== "resonance" && engine !== "milkdrop") {
     throw new Error('visual.engine / --engine must be "resonance" or "milkdrop"');
   }
+  const milkdropPresets = visual.milkdropPresets === undefined ? [] : visual.milkdropPresets;
+  if (!Array.isArray(milkdropPresets) || milkdropPresets.some(id => typeof id !== "string" || !id.trim())) {
+    throw new Error("visual.milkdropPresets / --milkdrop-presets must contain nonempty preset IDs");
+  }
+  const selectedPresets = (milkdropPresets as string[]).map(id => id.trim());
+  if (new Set(selectedPresets).size !== selectedPresets.length) {
+    throw new Error("visual.milkdropPresets / --milkdrop-presets must not contain duplicate IDs");
+  }
+  for (const id of selectedPresets) {
+    if (!MILKDROP_PRESETS.some(preset => preset.id === id)) {
+      throw new Error(`Unknown MilkDrop preset: ${id}. Choose ${MILKDROP_PRESETS.map(preset => preset.id).join(", ")}`);
+    }
+  }
   // Validate without resolving here: JSON paths belong to their config's directory.
   if (imagePath) resolveArtworkPath(imagePath);
 
@@ -167,6 +182,7 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
     },
     visual: {
       engine,
+      milkdropPresets: selectedPresets,
       imagePath,
       lighting: boundedNumber(visual.lighting, DEFAULT_CONFIG.visual.lighting ?? 0.65, "visual.lighting", 0, 1),
       seed: stringValue(visual.seed, DEFAULT_CONFIG.visual.seed, "visual.seed").trim() || "auto",

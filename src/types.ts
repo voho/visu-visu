@@ -21,6 +21,8 @@ export interface TextConfig {
 export interface VisualConfig {
   /** Resonance sculpture or the sequential MilkDrop-compatible WebGL engine. */
   engine?: "resonance" | "milkdrop";
+  /** Ordered MilkDrop playlist; empty uses the automatic preset selection. */
+  milkdropPresets?: string[];
   /** Optional local artwork, softened and masked behind the scene. */
   imagePath?: string;
   /** Strength of normal-mapped, music-reactive surface lighting; 0 disables it. */

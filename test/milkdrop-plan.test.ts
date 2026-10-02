@@ -15,6 +15,24 @@ function track(duration = 80, fps = 60, energy = 0.6, hits = true): AudioAnalysi
 }
 
 describe("MilkDrop preset planning", () => {
+  test("plays an explicit playlist in order, wrapping while preserving musical blends", () => {
+    const selection = ["tunnel-race", "mandelbox-explorer", "fractal-descent"];
+    const analysis = track(80);
+    const result = planMilkdrop(analysis, "flight", 0, 70 * 60, 60, selection, true);
+    expect(result.schedule.length).toBeGreaterThan(5);
+    result.schedule.forEach((entry, index) => {
+      expect(entry.preset).toBe(selection[index % selection.length]!);
+      if (index) {
+        expect(entry.frame - result.schedule[index - 1]!.frame).toBeGreaterThanOrEqual(8 * 60);
+        expect(entry.blendSeconds).toBeWithin(2.5, 4);
+      }
+    });
+    expect(planMilkdrop(analysis, "flight", 0, 70 * 60, 60, selection, true)).toEqual(result);
+    expect(selection).toEqual(["tunnel-race", "mandelbox-explorer", "fractal-descent"]);
+    expect(planMilkdrop(analysis, "flight", 0, 70 * 60, 60, ["tunnel-race"], true).schedule)
+      .toEqual([{ frame: 0, preset: "tunnel-race", blendSeconds: 0 }]);
+  });
+
   test("repeats a seeded schedule, varies seeds and cycles without immediate repeats", () => {
     const analysis = track(160);
     const source = presets.slice();

@@ -41,6 +41,7 @@ Render options:
       --render-scale <n>    Internal resolution scale (0.25–1, final default: 1)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --engine <name>       resonance (default) or milkdrop (requires Chrome)
+      --milkdrop-presets <ids>  Comma-separated preset IDs, played in order
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
       --image <file>        Local artwork; softened, masked, and used for colors
@@ -61,7 +62,7 @@ Clip options (portrait Full HD60, up to 30 seconds):
   -o, --output <file>       Output MP4 (default: <song>.clip.mp4)
       --title / --artist    Override audio tags; artist is required if untagged
   Also accepts --config, --analysis, --save-analysis, --resolution, --fps,
-  --render-scale, --seed, --engine, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
+  --render-scale, --seed, --engine, --milkdrop-presets, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
   Short sources use their available length. No clear drop: use sustained energy.
 
 Analyze options:
@@ -114,6 +115,7 @@ export function overrideConfig(
     renderScale?: string;
     seed?: string;
     engine?: string;
+    milkdropPresets?: string;
     title?: string;
     artist?: string;
     image?: string;
@@ -157,6 +159,7 @@ export function overrideConfig(
     }
     mutable.visual.engine = options.engine;
   }
+  if (options.milkdropPresets !== undefined) mutable.visual.milkdropPresets = options.milkdropPresets.split(",");
   if (options.title !== undefined) mutable.text.title = options.title;
   if (options.artist !== undefined) mutable.text.artist = options.artist;
   if (options.image !== undefined) mutable.visual.imagePath = resolveArtworkPath(options.image);
@@ -238,6 +241,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       "render-scale": { type: "string" },
       seed: { type: "string" },
       engine: { type: "string" },
+      "milkdrop-presets": { type: "string" },
       title: { type: "string" },
       artist: { type: "string" },
       image: { type: "string" },
@@ -275,6 +279,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       : { renderScale: values["render-scale"] }),
     ...(values.seed === undefined ? {} : { seed: values.seed }),
     ...(values.engine === undefined ? {} : { engine: values.engine }),
+    ...(values["milkdrop-presets"] === undefined ? {} : { milkdropPresets: values["milkdrop-presets"] }),
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
     ...(values.image === undefined ? {} : { image: values.image }),
@@ -359,6 +364,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
         title: config.text.title, artist: config.text.artist,
         imagePath: config.visual.imagePath ?? "",
         engine: config.visual.engine ?? "resonance",
+        milkdropPresets: config.visual.milkdropPresets ?? [],
       }, null, 2));
       return;
     }
