@@ -24,6 +24,7 @@ export interface PromoLayout {
 }
 
 const PHI = (1 + Math.sqrt(5)) / 2;
+const ARTIST_FONT_RATIO = 1 / PHI;
 
 /** Airy golden columns, centered as a group after the credits' ink is measured. */
 export function createPromoLayout(width: number, height: number,
@@ -37,7 +38,8 @@ export function createPromoLayout(width: number, height: number,
   const x = (width - groupWidth) / 2;
   const textX = x + size + coverGap;
   const fontSize = credits?.fontSize ?? Math.min(height * 0.105, width * (landscape ? 0.062 : 0.070));
-  const creditHeight = credits?.height ?? fontSize * 1.8 + fontSize / PHI ** 2;
+  const artistSize = fontSize * ARTIST_FONT_RATIO;
+  const creditHeight = credits?.height ?? (fontSize + artistSize) * 0.9 + fontSize / PHI ** 2;
   const scopeGap = fontSize / PHI ** 4;
   const scopeHeight = size * 0.68;
   const groupHeight = Math.max(size, creditHeight + scopeGap + scopeHeight);
@@ -48,7 +50,7 @@ export function createPromoLayout(width: number, height: number,
     group: { x, y: top, width: groupWidth, height: groupHeight },
     cover: { x, y: top, size },
     text: { x: textX, width: textWidth, centerY: top + creditHeight / 2,
-      top, bottom: top + creditHeight, titleSize: fontSize, artistSize: fontSize },
+      top, bottom: top + creditHeight, titleSize: fontSize, artistSize },
     scopeX: textX, scopeY, scopeWidth: textWidth, scopeHeight,
     spectrumX: width * 0.08, spectrumWidth: width * 0.84,
     spectrumTop: Math.max(top + groupHeight + scopeGap, spectrumBaseline - height * 0.3),
@@ -113,9 +115,10 @@ function fitCredits(context: SKRSContext2D, text: ProjectConfig["text"], width: 
   let fontSize = initial.text.titleSize;
   for (;;) {
     const title = textBlock(context, text.title, initial.text.width, fontSize, "Promo Serif", 600, 0);
-    const artist = textBlock(context, text.artist, initial.text.width, fontSize, "Promo Sans", 500, 0.09);
-    const commonSize = Math.min(title.size, artist.size);
-    if (commonSize < fontSize) { fontSize = commonSize; continue; }
+    const artistSize = fontSize * ARTIST_FONT_RATIO;
+    const artist = textBlock(context, text.artist, initial.text.width, artistSize, "Promo Sans", 500, 0.09);
+    const fitScale = Math.min(title.size / fontSize, artist.size / artistSize);
+    if (fitScale < 1) { fontSize *= fitScale; continue; }
     const gap = fontSize / PHI ** 2;
     const layout = createPromoLayout(width, height, { height: title.height + gap + artist.height, fontSize });
     // Reserve at least 12% for the analyzer beneath the centered group. Wrapped

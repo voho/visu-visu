@@ -81,7 +81,7 @@ describe("promo composition", () => {
       expect(group.x + group.width).toBeLessThanOrEqual(width! * 0.92 + 1e-8);
       expect(group.y).toBeGreaterThanOrEqual(height! * 0.06);
       expect(layout.text.centerY).toBeLessThan(height! / 2);
-      expect(layout.text.artistSize).toBe(layout.text.titleSize);
+      expect(layout.text.artistSize / layout.text.titleSize).toBeCloseTo(2 / (1 + Math.sqrt(5)), 8);
       expect(layout.text.x).toBeGreaterThan(layout.cover.x + layout.cover.size);
       expect(layout.text.x + layout.text.width).toBeLessThan(width!);
       expect(layout.text.width).toBeGreaterThan(0);
@@ -166,7 +166,7 @@ describe("promo composition", () => {
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(layout.scopeX + layout.scopeWidth + 1e-5);
         expect(bounds.y + bounds.height).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
         expect(bottom).toBeLessThan(layout.spectrumTop);
-        expect(layout.text.titleSize).toBe(layout.text.artistSize);
+        expect(layout.text.artistSize / layout.text.titleSize).toBeCloseTo(2 / (1 + Math.sqrt(5)), 8);
         expect(layout.text.titleSize).toBeLessThanOrEqual(createPromoLayout(width!, height!).text.titleSize);
         expect(cover.size).toBe(createPromoLayout(width!, height!).cover.size);
         expect(layout.spectrumBaseline - layout.spectrumTop).toBeGreaterThanOrEqual(height! * 0.12 - 1e-5);
@@ -181,12 +181,12 @@ describe("promo composition", () => {
     }
   });
 
-  test("preserves the approved cover and equal title/artist font sizes for short song names", () => {
+  test("preserves the approved cover and title size with a smaller golden-ratio artist credit", () => {
     for (const title of ["Bad Boys", "Event Horizon", "Night Blur"]) {
       const { renderer } = composition(1920, 1080, { title, artist: "voho" });
       expect(renderer.layout.cover.size).toBe(432);
       expect(renderer.layout.text.titleSize).toBeCloseTo(113.4, 8);
-      expect(renderer.layout.text.artistSize).toBeCloseTo(113.4, 8);
+      expect(renderer.layout.text.artistSize).toBeCloseTo(113.4 * 2 / (1 + Math.sqrt(5)), 8);
     }
   });
 
@@ -234,8 +234,8 @@ describe("promo composition", () => {
       expect(bottom).toBeLessThan(layout.scopeY - layout.scopeHeight / 2);
       if (text.artist === "voho") {
         const context = createCanvas(1, 1).getContext("2d");
-        context.font = '500 37.8px "Promo Sans"';
-        context.letterSpacing = `${37.8 * 0.09}px`;
+        context.font = `500 ${layout.text.artistSize}px "Promo Sans"`;
+        context.letterSpacing = `${layout.text.artistSize * 0.09}px`;
         const expected = context.measureText("voho");
         const expectedHeight = expected.actualBoundingBoxAscent + expected.actualBoundingBoxDescent;
         let artistTop = height;

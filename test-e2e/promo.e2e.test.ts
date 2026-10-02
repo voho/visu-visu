@@ -206,11 +206,12 @@ describe("promo mode end to end", () => {
     const titleHeight = title.bottom - title.top, artistHeight = artist.bottom - artist.top;
     expect(titleHeight).toBeGreaterThanOrEqual(20);
     expect(title.right - title.left).toBeGreaterThan(120);
-    expect(artistHeight).toBeGreaterThanOrEqual(20);
-    // Serif and sans-serif cap heights differ despite using the same em size.
-    expect(artistHeight / titleHeight).toBeGreaterThan(0.8);
-    expect(artistHeight / titleHeight).toBeLessThan(1.5);
-    expect(artist.right - artist.left).toBeGreaterThan(90);
+    expect(artistHeight).toBeGreaterThanOrEqual(13);
+    // The artist uses 1/φ of the title em size; the two font families also
+    // differ in cap height, so measure their encoded visible hierarchy.
+    expect(artistHeight / titleHeight).toBeGreaterThan(0.5);
+    expect(artistHeight / titleHeight).toBeLessThan(0.85);
+    expect(artist.right - artist.left).toBeGreaterThan(55);
     const titleCenter = (title.left + title.right) / 2;
     const artistCenter = (artist.left + artist.right) / 2;
     expect(Math.abs(titleCenter - artistCenter)).toBeLessThan(4);
