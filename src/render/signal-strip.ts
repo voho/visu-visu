@@ -2,22 +2,13 @@ import type { SKRSContext2D } from "@napi-rs/canvas";
 import { frameAt } from "../audio/analyze.js";
 import { clamp, lerp, smoothstep } from "../math/random.js";
 import type { AudioAnalysis } from "../types.js";
-import { AUDIO_FIELD_BANDS, audioFieldAt } from "./audio-field.js";
+import { audioFieldAt } from "./audio-field.js";
 import { smoothSample } from "./audio-field-geometry.js";
 import { signalBand, type SafeLayout } from "./layout.js";
 import type { Rgb } from "./lighting.js";
 import { liftSwatch, paletteRgb, rgbCss, type ScenePalette } from "./palette.js";
-import { surfaceFeatureSamples } from "./surface-signal.js";
+import { SPECTRUM_STRIP_BANDS, spectrumReadoutAt } from "./spectrum-readout.js";
 
-/** Track-relative ceiling per band: a hat that never exceeds 0.1 still fills its bar. */
-const bandCeilings = new WeakMap<AudioAnalysis, Float64Array>();
-/**
- * Near the band's own maximum rather than its p90: at this song's drop 21 of
- * 32 bars clipped against p90 and the strip read as a flat wall.
- */
-const CEILING_PERCENTILE = 0.98;
-/** Below this the band is silence in any master; dividing by less would amplify noise. */
-const CEILING_FLOOR = 0.12;
 /** A frame's waveform is shown at unit shape; quieter blocks than this stay small. */
 const WAVEFORM_FLOOR = 0.05;
 /** Points along the floor oscilloscope. */
@@ -30,6 +21,14 @@ export interface StripBar {
   width: number;
   height: number;
 }
+export interface StripPeak {
+  band: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  alpha: number;
+}
 export interface ScopeTrace {
   points: Array<{ x: number; y: number }>;
   alpha: number;
@@ -37,6 +36,8 @@ export interface ScopeTrace {
 }
 export interface SignalBandFrame {
   bars: StripBar[];
+  /** Held spectral maxima, falling slowly after a hit. */
+  peaks: StripPeak[];
   /** The per-band levels behind the bars, on the track's own scale; the embers pulse with them. */
   levels: Float32Array;
   barAlpha: number;
@@ -65,49 +66,26 @@ export interface SignalDrive {
 
 const unit = (value: number): number => Number.isFinite(value) ? clamp(value) : 0;
 
-function ceilingsFor(analysis: AudioAnalysis): Float64Array {
-  const cached = bandCeilings.get(analysis);
-  if (cached) return cached;
-  const ceilings = new Float64Array(AUDIO_FIELD_BANDS).fill(CEILING_FLOOR);
-  const count = analysis.frames.length;
-  if (count > 0) {
-    const column = new Float64Array(count);
-    for (let band = 0; band < AUDIO_FIELD_BANDS; band++) {
-      for (let index = 0; index < count; index++) column[index] = unit(surfaceFeatureSamples(analysis.frames[index]!)[band]!);
-      column.sort();
-      ceilings[band] = Math.max(CEILING_FLOOR, column[Math.min(count - 1, Math.floor(count * CEILING_PERCENTILE))]!);
-    }
-  }
-  bandCeilings.set(analysis, ceilings);
-  return ceilings;
+/** Track-relative causal levels, with an immediate bass lift ahead of the FFT envelope. */
+export function normalizedBandsAt(analysis: AudioAnalysis, time: number, kick = 0): Float32Array {
+  return kickBands(spectrumReadoutAt(analysis, time).levels, kick);
 }
 
-/**
- * Band levels on the track's own scale: each causal envelope divided by that
- * band's own ceiling over the whole song, so quiet hats and loud kicks both
- * reach the top of their bars. The kick reaches the bottom bars a frame
- * before the FFT envelope does.
- */
-export function normalizedBandsAt(analysis: AudioAnalysis, time: number, kick = 0): Float32Array {
-  const ceilings = ceilingsFor(analysis);
-  const { spectrum } = audioFieldAt(analysis, time);
-  const levels = new Float32Array(AUDIO_FIELD_BANDS);
-  for (let band = 0; band < AUDIO_FIELD_BANDS; band++) {
-    const level = unit(spectrum[band]! / ceilings[band]!) ** 0.8;
-    levels[band] = unit(level + (band < 5 ? unit(kick) * 0.2 : 0));
-  }
+function kickBands(levels: Float32Array, kick: number): Float32Array {
+  for (let band = 0; band < 10; band++) levels[band] = unit(levels[band]! + unit(kick) * 0.2);
   return levels;
 }
 
-/** 32 rounded bars growing up from the band's baseline, warm bass on the left. */
+/** 64 rounded bars growing up from the band's baseline, warm bass on the left. */
 export function spectrumStripGeometry(layout: SafeLayout, height: number, levels: ArrayLike<number>, sectionGain: number): StripBar[] {
   const band = signalBand(layout, height);
-  const pitch = layout.width / AUDIO_FIELD_BANDS;
+  const pitch = layout.width / SPECTRUM_STRIP_BANDS;
   const width = pitch * 0.62;
   const gain = Number.isFinite(sectionGain) ? clamp(sectionGain, 0.1, 1) : 1;
-  return Array.from({ length: AUDIO_FIELD_BANDS }, (_, index) => {
+  return Array.from({ length: SPECTRUM_STRIP_BANDS }, (_, index) => {
     const level = unit(levels[index] ?? 0);
-    const barHeight = height * (0.008 + 0.074 * level) * gain;
+    const minimum = height * 0.008 * band.geometryScale;
+    const barHeight = (minimum + (band.barMax - minimum) * level) * gain;
     return { band: index, x: layout.left + pitch * index + (pitch - width) / 2,
       y: band.barBaseline - barHeight, width, height: barHeight };
   });
@@ -145,10 +123,25 @@ export function signalBandAt(analysis: AudioAnalysis, time: number, layout: Safe
   const scale = height / 1080;
   const sectionGain = 0.6 + 0.4 * unit(drive.section);
   const field = audioFieldAt(analysis, time);
-  const levels = normalizedBandsAt(analysis, time, drive.kick);
+  const readout = spectrumReadoutAt(analysis, time);
+  const levels = kickBands(readout.levels, drive.kick);
   const bars = spectrumStripGeometry(layout, height, levels, sectionGain);
-  const amplitude = (2.5 + field.fast * 20) * scale * sectionGain;
+  const band = signalBand(layout, height);
+  const peakHeight = 2.2 * scale;
+  const peakLevels = readout.peaks;
+  const peakBars = spectrumStripGeometry(layout, height, peakLevels, sectionGain);
+  const peaks = peakBars.map((peak, index): StripPeak => ({
+    band: index, x: peak.x, y: Math.min(peak.y, bars[index]!.y) - peakHeight,
+    width: peak.width, height: peakHeight,
+    alpha: unit(Math.max(peakLevels[index]!, levels[index]!) / 0.04),
+  }));
   const lineWidth = (2.4 + field.fast * 1.2) * scale;
+  // Reserve a real gap between the widest glow stroke and full-height peak caps.
+  const scopeRoom = Math.max(0, Math.min(
+    band.barBaseline - band.barMax - peakHeight - 2 * scale - band.scopeY - lineWidth * 2,
+    band.scopeY - layout.graphBottom - height * 0.01,
+  ));
+  const amplitude = Math.min((2.5 + field.fast * 20) * scale * sectionGain * band.geometryScale, scopeRoom);
   const alpha = 0.55 + field.fast * 0.45;
   const fps = Number.isFinite(analysis.fps) && analysis.fps > 0 ? analysis.fps : 30;
   const traces = [1, 0.45, 0.2].map((fade, age): ScopeTrace => ({
@@ -156,7 +149,7 @@ export function signalBandAt(analysis: AudioAnalysis, time: number, layout: Safe
     alpha: alpha * fade,
     lineWidth: age === 0 ? lineWidth : lineWidth * 0.8,
   }));
-  return { bars, levels, barAlpha: 0.55 + field.slow * 0.35, traces, scopeGlow: unit(drive.treblePulse) * 0.2, scale };
+  return { bars, peaks, levels, barAlpha: 0.55 + field.slow * 0.35, traces, scopeGlow: unit(drive.treblePulse) * 0.2, scale };
 }
 
 /**
@@ -166,7 +159,7 @@ export function signalBandAt(analysis: AudioAnalysis, time: number, layout: Safe
  * ring (or an RGB mix) passes through grey between two pigments.
  */
 function barColor(style: SignalStripStyle, band: number, floor: number, extra: number): Rgb {
-  const position = band / (AUDIO_FIELD_BANDS - 1);
+  const position = band / (SPECTRUM_STRIP_BANDS - 1);
   const warm = liftSwatch(paletteRgb(style.palette, style.warm.phase + style.warm.direction * 36 * position), floor, extra);
   const cool = liftSwatch(paletteRgb(style.palette, style.cool.phase + style.cool.direction * 36 * (1 - position)), floor, extra);
   const mix = smoothstep(0.42, 0.58, position);
@@ -196,6 +189,13 @@ export function drawSignalBand(context: SKRSContext2D, frame: SignalBandFrame, s
     }
     context.beginPath();
     context.roundRect(bar.x, bar.y, bar.width, bar.height, radius);
+    context.fill();
+  }
+  for (const peak of frame.peaks) {
+    if (peak.alpha <= 0) continue;
+    context.fillStyle = rgbCss(barColor(style, peak.band, 0.52, 0.18), peak.alpha * (emission ? 0.48 : 0.94));
+    context.beginPath();
+    context.roundRect(peak.x, peak.y, peak.width, peak.height, peak.height / 2);
     context.fill();
   }
   const traces = emission ? frame.traces.slice(0, 1) : frame.traces;

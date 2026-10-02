@@ -110,7 +110,16 @@ export function emberPoseAt(ember: Ember, drive: EmberDrive): EmberPose {
     + drive.pan.x * panRate + drive.cover.x * coverRate;
   const ny = wrap((ember.y - rise) / WRAP_SPAN) * WRAP_SPAN - WRAP_OFFSET
     + drive.pan.y * panRate + drive.cover.y * coverRate;
-  const level = unit(drive.bands[ember.band] ?? 0);
+  // Ember assignments span the complete spectrum even when the readout has
+  // more bins than the material field. Average the assigned frequency slice.
+  const start = ember.band / AUDIO_FIELD_BANDS * drive.bands.length;
+  const end = (ember.band + 1) / AUDIO_FIELD_BANDS * drive.bands.length;
+  let energy = 0;
+  for (let band = Math.floor(start); band < Math.ceil(end); band++) {
+    const overlap = Math.max(0, Math.min(end, band + 1) - Math.max(start, band));
+    energy += unit(drive.bands[band] ?? 0) * overlap;
+  }
+  const level = energy / Math.max(1e-9, end - start);
   let alpha = (0.10 + 0.55 * level) * (0.6 + 0.4 * unit(drive.section))
     * (0.7 + 0.3 * Math.sin(time * 0.9 + ember.phase));
   if (ember.sparkle) alpha += 0.2 * unit(drive.treblePulse);

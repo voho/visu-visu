@@ -110,6 +110,19 @@ describe("cover-coloured ember bokeh", () => {
     }
   });
 
+  test("preserves bass-to-treble assignments when the readout doubles its resolution", () => {
+    const ember = { ...createEmberPlan("treble", 1)[0]!, band: 31, x: 0.1, y: 0.8 };
+    const spectrum32 = new Float32Array(32);
+    spectrum32[31] = 0.6;
+    const spectrum64 = new Float32Array(64);
+    spectrum64[62] = 0.4;
+    spectrum64[63] = 0.8;
+    const pose32 = emberPoseAt(ember, driveAt(2, { bands: spectrum32 }));
+    const pose64 = emberPoseAt(ember, driveAt(2, { bands: spectrum64 }));
+    expect(pose64.alpha).toBeCloseTo(pose32.alpha, 7);
+    expect(pose64.alpha).toBeGreaterThan(emberPoseAt(ember, driveAt(2, { bands: new Float32Array(64) })).alpha * 2);
+  });
+
   test("draws only its plane, in palette colours, and restores the context", () => {
     const plan = createEmberPlan("draw", 28);
     const canvas = createCanvas(320, 180);

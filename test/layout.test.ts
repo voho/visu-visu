@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createSafeLayout, safeGraphRadii, safeGraphRadius } from "../src/render/layout.js";
+import { createSafeLayout, safeGraphRadii, safeGraphRadius, signalBand } from "../src/render/layout.js";
 
 function expectOrdered(layout: ReturnType<typeof createSafeLayout>): void {
   expect(layout.left).toBeLessThan(layout.centerX);
@@ -30,7 +30,8 @@ describe("platform-safe render layout", () => {
     expect(layout.left).toBeGreaterThanOrEqual(1920 * 0.08);
     expect(layout.right).toBeLessThanOrEqual(1920 * 0.92);
     expect(layout.graphTop).toBe(1080 * 0.32);
-    expect(layout.graphBottom).toBe(1080 * 0.78);
+    expect(layout.graphBottom).toBe(1080 * 0.7);
+    expect(signalBand(layout, 1080).barBaseline).toBeLessThanOrEqual(layout.bottom);
   });
 
   test("reserves portrait space for captions, controls, and the right action rail", () => {
@@ -52,5 +53,16 @@ describe("platform-safe render layout", () => {
     expectOrdered(layout);
     expect(layout.bottom).toBeLessThanOrEqual(1080 * 0.62);
     expect(layout.right).toBeLessThanOrEqual(1080 * 0.8);
+  });
+
+  test("keeps credits and complete readouts between player hover reserves at every output scale", () => {
+    for (const [width, height] of [[1920, 1080], [1080, 1920], [1080, 1080], [480, 270], [270, 480]]) {
+      const layout = createSafeLayout(width!, height!);
+      const band = signalBand(layout, height!);
+      expect(layout.titleY).toBeGreaterThan(height! * 0.16);
+      expect(band.scopeY).toBeGreaterThan(layout.graphBottom);
+      expect(band.scopeY).toBeLessThan(band.barBaseline - band.barMax);
+      expect(band.barBaseline).toBeLessThanOrEqual(height! * 0.8 + 1e-9);
+    }
   });
 });

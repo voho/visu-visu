@@ -47,8 +47,8 @@ export function createSafeLayout(width: number, height: number): SafeLayout {
             bottom: 0.2,
             titleY: 0.18,
             graphTop: 0.32,
-            horizon: 0.56,
-            graphBottom: 0.78,
+            horizon: 0.51,
+            graphBottom: 0.7,
           };
 
   const left = width * profile.left;
@@ -83,19 +83,25 @@ export interface SignalBand {
   barBaseline: number;
   /** Tallest bar, so bars never reach the oscilloscope. */
   barMax: number;
+  /** Fit vertical bar and waveform movement into the available readout space. */
+  geometryScale: number;
 }
 
 /**
  * The music readouts live in the band below the graph, which no hero layer
- * enters. The same height fractions serve every orientation; in portrait
- * and square output the band deliberately enters the caption reserve as
- * decoration, never carrying text.
+ * enters. Reserve the bottom 20% for player controls and the seek bar. The
+ * landscape band compresses slightly to keep the sculpture large; portrait
+ * and square readouts already sit above this boundary. Only full-bleed
+ * atmosphere may continue behind the player's hover overlays.
  */
 export function signalBand(layout: SafeLayout, height: number): SignalBand {
+  const span = Math.max(0, Math.min(height * 0.14, height * 0.8 - layout.graphBottom));
+  const geometryScale = span / (height * 0.14);
   return {
-    scopeY: layout.graphBottom + height * 0.036,
-    barBaseline: layout.graphBottom + height * 0.14,
-    barMax: height * 0.082,
+    scopeY: layout.graphBottom + height * 0.028 * geometryScale,
+    barBaseline: layout.graphBottom + span,
+    barMax: height * 0.082 * geometryScale,
+    geometryScale,
   };
 }
 
