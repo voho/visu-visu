@@ -3,7 +3,7 @@ import { MILKDROP_PRESETS, milkdropPreset } from './presets.js';
 
 const butterchurn=butterchurnModule.default??butterchurnModule;
 let job,visualizer,gl,canvas,pcm,compose,rawPixels,topDownPixels;
-let simulationIndex=0,scheduleIndex=0,running=false;
+let simulationIndex=0,running=false;
 let stats={ready:false,complete:false,frames:0,simulationFrames:0,preset:null,presetName:null,clock:0,renderMs:0,postMs:0};
 function assertGpu(stage) {
   const code=gl.getError();
@@ -163,7 +163,9 @@ async function init(config) {
   if(stats.ready)throw new Error('A MilkDrop page can initialize only one export job');
   job=config;
   if(job.sampleRate!==44100)throw new Error('Butterchurn 2.6.7 requires 44100 Hz PCM for its offline frequency analysis');
-  if(!job.palette?.length||!job.schedule?.length)throw new Error('MilkDrop requires a palette and a preset schedule');
+  if(!job.palette?.length)throw new Error('MilkDrop requires a palette');
+  if(job.schedule?.length!==1||job.schedule[0].frame!==0||job.schedule[0].blendSeconds!==0)
+    throw new Error('MilkDrop requires exactly one preset, loaded at frame zero without a blend');
   const [audio,cover]=await Promise.all([
     resource('/pcm').then(response=>response.arrayBuffer()),job.hasArtwork?image('/cover.png'):null,
   ]);
@@ -172,7 +174,7 @@ async function init(config) {
   canvas.id='milkdrop-output';canvas.style.cssText='width:100vw;height:100vh;display:block;object-fit:contain;background:black';
   document.body.style.cssText='margin:0;background:black;overflow:hidden';document.body.replaceChildren(canvas);
   // The pinned stable engine predates its newer deterministic option. Its
-  // internal noise, preset transitions and rand() all use this seeded stream.
+  // internal noise and rand() use this seeded stream.
   Math.random=seededRandom(job.seed);
   visualizer=butterchurn.createVisualizer(null,canvas,{
     width:job.width,height:job.height,pixelRatio:1,textureRatio:1,
@@ -192,10 +194,9 @@ async function init(config) {
     }
   };
   const first=job.schedule[0];
-  if(first.frame!==0)throw new Error('MilkDrop preset schedule must begin at frame zero');
   visualizer.loadPreset(milkdropPreset(first.preset),0);
   assertGpu('preset compilation');
-  scheduleIndex=1;stats.preset=first.preset;stats.presetName=MILKDROP_PRESETS.find(preset=>preset.id===first.preset).name;
+  stats.preset=first.preset;stats.presetName=MILKDROP_PRESETS.find(preset=>preset.id===first.preset).name;
   compose=createCompositor(cover);
   assertGpu('compositor initialization');
   cover?.close();
@@ -224,11 +225,6 @@ async function renderAll() {
       if(stats.error||gl.isContextLost())throw new Error(stats.error??'MilkDrop GPU context was lost');
       const begin=performance.now(),time=job.simulationStart+simulationIndex/job.fps;
       visualizer.renderer.time=time;
-      while(scheduleIndex<job.schedule.length&&job.schedule[scheduleIndex].frame<=simulationIndex){
-        const transition=job.schedule[scheduleIndex++],descriptor=MILKDROP_PRESETS.find(preset=>preset.id===transition.preset);
-        visualizer.loadPreset(milkdropPreset(transition.preset),transition.blendSeconds);
-        stats.preset=transition.preset;stats.presetName=descriptor.name;
-      }
       const end=Math.floor(simulationIndex*job.sampleRate/job.fps);
       for(let i=0;i<1024;i++){
         const sampleIndex=end-1024+i;

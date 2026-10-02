@@ -90,7 +90,7 @@ bun run clip -- ./song.wav --mode promo --image ./cover.png \
   --title "Night Signal" --artist "Artist Name"
 ```
 
-The complete cover supplies the palette for the background and musical readouts. An immersive MilkDrop playlist blends **martin - tunnel race** and **martin - mandelbox explorer - high speed demo version** by default; `--milkdrop-presets` replaces it with an ordered selection. Its palette-mapped light is darkened behind the **Golden gallery** composition: a large, crisp cover stays vertically centered on the left, with credits and a separate oscilloscope arranged on golden-ratio guides to its right. Titles use **Cormorant Garamond 600** and artist names use **Manrope 500 at the same font size as the title**, with soft cover and letter shadows. Both fonts are bundled under the [SIL Open Font License](./assets/fonts/README.md) so no font download is needed when rendering. The waveform has a maximum peak-to-peak range of **68% of the cover height** and tapers at its ends. A fast-reacting 64-band spectrum with slower, gently falling peak caps shares the outer horizontal margins and grows upward above a bottom player-control reserve. At Full HD, the cover remains 432 pixels square and the title and artist use 113.4-pixel type before fitting unusually long credits. The promo layout omits the sculpture and its orbiting effects.
+The complete cover supplies the palette for the background and musical readouts. One immersive MilkDrop preset stays active for the entire song. Promo selects either **martin - tunnel race** or **martin - mandelbox explorer - high speed demo version** by default; `--milkdrop-presets` supplies a different candidate pool, and the chosen preset name is printed when rendering. Its palette-mapped light is darkened behind the **Golden gallery** composition: a large, crisp cover stays vertically centered on the left, with credits and a separate oscilloscope arranged on golden-ratio guides to its right. Titles use **Cormorant Garamond 600** and artist names use **Manrope 500 at the same font size as the title**, with soft cover and letter shadows. Both fonts are bundled under the [SIL Open Font License](./assets/fonts/README.md) so no font download is needed when rendering. The waveform has a maximum peak-to-peak range of **68% of the cover height** and tapers at its ends. A fast-reacting 64-band spectrum with slower, gently falling peak caps shares the outer horizontal margins and grows upward above a bottom player-control reserve. At Full HD, the cover remains 432 pixels square and the title and artist use 113.4-pixel type before fitting unusually long credits. The promo layout omits the sculpture and its orbiting effects.
 
 Default outputs are `<song>.promo.mp4` and `<song>.promo.clip.mp4`. Full HD 60 fps, H.264/AAC, synchronized entrance/end fades, explicit seeds, analysis reuse and the existing quality profiles work as usual. The analyzer stops at 94% of the frame height, leaving room for player controls; its available travel is about 18% of a Full HD frame and never exceeds 30%. Set `visual.mode` to `"promo"` in JSON to save this layout with a project.
 
@@ -116,11 +116,11 @@ Artist case is preserved, including `voho`. With `--artist`, the title defaults 
 
 ## MilkDrop engine
 
-Use `--engine milkdrop` to put actual MilkDrop-compatible visuals behind the Resonance sculpture. [Butterchurn](https://github.com/jberg/butterchurn) runs the preset equations, warped framebuffer feedback and blended transitions, giving the room rotating vortices, folded tunnels, flowing ribbons, particles and fractal motion. The existing textured sculpture, ghosts, fragments, embers, spectrum, oscilloscope and centered cover/title/artist group remain in front. The default `--engine resonance` stays available without a browser.
+Use `--engine milkdrop` to put actual MilkDrop-compatible visuals behind the Resonance sculpture. [Butterchurn](https://github.com/jberg/butterchurn) runs one preset's equations and warped framebuffer feedback throughout each song, giving the room rotating vortices, folded tunnels, flowing ribbons, particles and fractal motion. The existing textured sculpture, ghosts, fragments, embers, spectrum, oscilloscope and centered cover/title/artist group remain in front. The default `--engine resonance` stays available without a browser.
 
 ![Butterchurn folded tunnel behind the Resonance sculpture](./docs/showcase-milkdrop.png)
 
-Frame from a native Full HD60 export using the bundled audio loop, repeated to demonstrate a 30-second sequence of preset transitions.
+Frame from a native Full HD60 export using the bundled audio loop.
 
 ```sh
 bun run render -- ./song.wav --engine milkdrop --image ./cover.png \
@@ -133,7 +133,7 @@ bun run clip:milkdrop -- ./song.wav --artist "Artist Name"
 
 Install Google Chrome or Chromium for this engine. The exporter finds a system installation, or uses the executable named by `VISU_CHROME_PATH`. It launches its own temporary headless browser, without using your browser profile. Assets and raw frames travel only through a temporary localhost server; your media is not uploaded. Full HD60, quality profiles, audio, fades and automatic portrait highlight selection use the same delivery settings as ordinary renders.
 
-A seeded musical schedule selects from eight presets, favoring different families with bass, mids, treble and section energy. It avoids repeats until the selection cycles, changes roughly every 8–13 seconds, and blends over 2.5–4 seconds. A 30-second output includes at least three different presets. Their original names and credits are retained:
+Each song uses **one preset for the whole video**. Standard MilkDrop mode chooses from the eight presets below. The choice is deterministic from the source audio identity and `visual.seed`; changing excerpt start, duration, frame rate or resolution keeps the same choice for the same song and candidate pool. The selected preset continues reacting to the music without cycling to another preset. Its original name is printed at render startup, with these names and credits retained:
 
 | ID | Preset |
 | --- | --- |
@@ -146,7 +146,7 @@ A seeded musical schedule selects from eight presets, favoring different familie
 | `folded-tunnel` | Flexi + Martin — tunnel of supraschismatika |
 | `moebius` | Flexi — motion blurred moebius fractal — early alpha version |
 
-Choose an ordered playlist with `--milkdrop-presets`, or `visual.milkdropPresets` in JSON. One ID holds that preset for the whole video; multiple IDs blend in the supplied order and repeat. Leaving the option unset keeps the eight-preset automatic selection above. Three additional 3D and fractal presets are available for explicit selection:
+Choose a preset or candidate pool with `--milkdrop-presets`, or `visual.milkdropPresets` in JSON. One ID holds that exact preset; multiple IDs choose one member for the entire song and never cycle. Leaving the option unset uses the eight-preset pool above in standard mode, or the two immersive presets described under promo mode. Three additional 3D and fractal presets are available for explicit selection:
 
 | ID | Preset |
 | --- | --- |
@@ -159,7 +159,9 @@ bun run render:milkdrop -- ./song.wav \
   --milkdrop-presets tunnel-race,mandelbox-explorer --title "Night Signal"
 ```
 
-The same option works with `clip:milkdrop`. Explicit playlists retain the audio-driven transition timing and smooth blends. Use the same `--seed` to keep the foreground geometry and palette while comparing playlists; automatic seeds also include the selected IDs and their order.
+The same option works with `clip:milkdrop`: a full render and a clip of the same song keep the same preset when their seed and candidate pool match. Changing `--seed` explores another repeatable choice. Reuse one explicit seed to keep the foreground geometry and palette stable while comparing candidate pools. The general automatic render seed still includes the configured IDs and their order; preset selection uses its own song-based key so output settings do not change the selected preset.
+
+The log distinguishes the configured `Song seed` (including `auto`) from the resolved render `Seed`. To reproduce an automatic render using its printed render seed, also pin its printed preset ID with `--milkdrop-presets <id>`; otherwise, supplying that seed explicitly may choose another preset.
 
 The final MilkDrop light uses the same cover-derived or seeded palette as the sculpture and readouts. It retains 68% of the mapped color's saturation and blends at 48% opacity, with additional soft attenuation behind the sculpture and credits. This keeps the background moving while letting the main visualization stand out; the cover itself and foreground colors retain their existing treatment. Low-flash mode softens this additional layer; the original presets do not carry the Resonance engine's measured global flash bound. This path uses pinned Butterchurn **2.6.7** and preset collection **2.4.7**, with [third-party attribution and license notices](./docs/third-party.md). It supports these MilkDrop 2-compatible presets, not MilkDrop3-specific shaders or `.milk2` loading.
 

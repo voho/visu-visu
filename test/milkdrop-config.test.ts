@@ -25,7 +25,7 @@ function analysis(): AudioAnalysis {
 }
 
 describe("MilkDrop engine selection and composition", () => {
-  test("validates ordered preset playlists from JSON and CLI without changing automatic defaults", () => {
+  test("validates preset candidate pools from JSON and CLI without changing automatic defaults", () => {
     expect(parseProjectConfig({}).visual.milkdropPresets).toEqual([]);
     expect(MILKDROP_DEFAULT_PRESET_IDS).toEqual(["vortex", "ribbons", "cosmic-dust", "fog-tunnel", "julia-fractal", "plasma", "folded-tunnel", "moebius"]);
     const custom = overrideConfig(DEFAULT_CONFIG, { engine: "milkdrop", milkdropPresets: "tunnel-race, mandelbox-explorer" });
@@ -46,7 +46,7 @@ describe("MilkDrop engine selection and composition", () => {
     }
   });
 
-  test("binds automatic MilkDrop seeds to playlist order without changing explicit seeds", () => {
+  test("preserves render seeds for existing preset configurations and explicit seeds", () => {
     const source = analysis();
     const base = overrideConfig(DEFAULT_CONFIG, { engine: "milkdrop" });
     const legacy = structuredClone(base);

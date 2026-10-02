@@ -45,7 +45,7 @@ Render options:
       --seed <value>        Reproducible visual seed (default: PCM-derived)
       --mode <name>         standard (default) or promo (requires cover/title/artist)
       --engine <name>       resonance (default) or milkdrop (requires Chrome)
-      --milkdrop-presets <ids>  Comma-separated preset IDs, played in order
+      --milkdrop-presets <ids>  Candidate IDs; one preset held for the whole song
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
       --image <file>        Local artwork; softened, masked, and used for colors

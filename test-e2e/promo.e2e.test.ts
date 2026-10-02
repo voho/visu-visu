@@ -5,6 +5,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { MILKDROP_PRESETS } from "../src/milkdrop/presets.js";
 
 const execute = promisify(execFile);
 const cli = resolve(import.meta.dir, "../src/cli.ts");
@@ -120,8 +121,18 @@ describe("promo mode end to end", () => {
       "--mode", "promo", "--image", imagePath, "--title", "NIGHT SIGNAL", "--artist", "VOHO",
       "--output", output, "--size", `${width}x${height}`, "--fps", String(fps), "--start", "7",
       "--duration", String(duration), "--fade", "0", "--seed", "promo-e2e"], 300_000);
-    expect(result.stdout + result.stderr).toMatch(/milkdrop/i);
-    expect(result.stdout + result.stderr).toContain("tunnel-race");
+    const log = result.stdout + result.stderr;
+    expect(log).toMatch(/milkdrop/i);
+    const schedules = log.split(/\r?\n/).filter(line => line.startsWith("MilkDrop "));
+    expect(schedules).toHaveLength(1);
+    const entries = Array.from(schedules[0]!.matchAll(/(\d+\.\d+)s ([\w-]+)/g));
+    expect(entries).toHaveLength(1);
+    const presetId = entries[0]![2]!;
+    expect(["tunnel-race", "mandelbox-explorer"]).toContain(presetId);
+    expect(schedules[0]).toBe(`MilkDrop 0.0s ${presetId}`);
+    const preset = MILKDROP_PRESETS.find(candidate => candidate.id === presetId);
+    expect(preset).toBeDefined();
+    expect(log.split(/\r?\n/).filter(line => /^Presets?\s/.test(line))).toEqual([`Preset   ${preset!.name}`]);
     const probe = JSON.parse((await command("ffprobe", ["-v", "error", "-count_frames",
       "-show_streams", "-show_format", "-of", "json", output])).stdout) as {
       streams: Array<Record<string, string | number>>;

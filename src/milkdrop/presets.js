@@ -25,7 +25,7 @@ export const MILKDROP_PRESETS=Object.freeze([
   {id:'tunnel-race',name:'martin - tunnel race',family:'3D tunnel flight'},
   {id:'fractal-descent',name:'flexi - fractal descent',family:'crystalline fractal descent'},
 ].map(Object.freeze));
-// Keep existing automatic sequences stable; heavier 3D worlds are opt-in.
+// Standard mode chooses one preset per song from this pool; promo uses its own 3D pool.
 export const MILKDROP_DEFAULT_PRESET_IDS=Object.freeze(['vortex','ribbons','cosmic-dust','fog-tunnel','julia-fractal','plasma','folded-tunnel','moebius']);
 const presets={vortex,ribbons,'cosmic-dust':dust,'fog-tunnel':fog,'julia-fractal':julia,plasma,'folded-tunnel':tunnel,moebius,
   'mandelbox-explorer':mandelbox,'tunnel-race':race,'fractal-descent':descent};

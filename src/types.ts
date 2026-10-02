@@ -23,7 +23,7 @@ export interface VisualConfig {
   mode?: "standard" | "promo";
   /** Resonance sculpture or the sequential MilkDrop-compatible WebGL engine. */
   engine?: "resonance" | "milkdrop";
-  /** Ordered MilkDrop playlist; empty uses the automatic preset selection. */
+  /** MilkDrop candidate pool; one preset is held per song. Empty uses the mode defaults. */
   milkdropPresets?: string[];
   /** Optional local artwork, softened and masked behind the scene. */
   imagePath?: string;

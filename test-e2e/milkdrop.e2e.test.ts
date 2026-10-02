@@ -5,12 +5,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { MILKDROP_DEFAULT_PRESET_IDS, MILKDROP_PRESETS } from "../src/milkdrop/presets.js";
 
 const execute = promisify(execFile);
 const cli = resolve(import.meta.dir, "../src/cli.ts");
 const fps = 60, duration = 30, sampleRate = 24_000;
 const smallWidth = 360, smallHeight = 640;
 let directory: string, audioPath: string, imagePath: string;
+let selectedSongPreset: string | undefined;
 
 async function command(executable: string, args: string[], timeout = 30_000) {
   try {
@@ -55,6 +57,23 @@ afterAll(async () => {
 function args(output: string): string[] {
   return ["--engine", "milkdrop", "--output", output, "--image", imagePath,
     "--seed", "milkdrop-e2e", "--resolution", "fullhd", "--fps", String(fps), "--render-scale", "0.25"];
+}
+
+function verifyHeldSongPreset(log: string): void {
+  const schedules = log.split(/\r?\n/).filter(line => line.startsWith("MilkDrop "));
+  expect(schedules).toHaveLength(1);
+  const entries = Array.from(schedules[0]!.matchAll(/(\d+\.\d+)s ([\w-]+)/g));
+  expect(entries).toHaveLength(1);
+  const id = entries[0]![2]!;
+  expect(schedules[0]).toBe(`MilkDrop 0.0s ${id}`);
+  expect(MILKDROP_DEFAULT_PRESET_IDS.some(candidate => candidate === id)).toBe(true);
+  const preset = MILKDROP_PRESETS.find(candidate => candidate.id === id);
+  expect(preset).toBeDefined();
+  expect(log.split(/\r?\n/).filter(line => /^Presets?\s/.test(line))).toEqual([`Preset   ${preset!.name}`]);
+  // Both public commands use the same song and raw seed, despite different
+  // excerpt lengths, starts and aspect ratios. This also works in either order.
+  if (selectedSongPreset !== undefined) expect(id).toBe(selectedSongPreset);
+  selectedSongPreset = id;
 }
 
 async function verifyContainer(path: string, width: number, height: number, seconds: number): Promise<void> {
@@ -149,7 +168,25 @@ const brightness = (frame: Buffer, pixels: number[]) => pixels.reduce((sum, inde
   sum + (frame[index]! + frame[index + 1]! + frame[index + 2]!) / 3, 0) / Math.max(1, pixels.length);
 
 describe("MilkDrop engine end to end", () => {
-  test("renders landscape through the real browser engine and encodes Full HD60", async () => {
+  test("keeps automatic preset selection across output settings and reordered candidate pools", async () => {
+    const chosen: string[] = [];
+    for (const [index, size, rate, start, candidates] of [
+      [0, "640x360", 30, 0, "tunnel-race,mandelbox-explorer"],
+      [1, "360x640", 60, 7, "mandelbox-explorer,tunnel-race"],
+    ] as const) {
+      const result = await command(process.execPath, [cli, "render", audioPath,
+        "--engine", "milkdrop", "--image", imagePath, "--size", size, "--fps", String(rate),
+        "--start", String(start), "--duration", "0.1", "--render-scale", "0.25",
+        "--milkdrop-presets", candidates, "--output", join(directory, `auto-${index}.mp4`)], 120_000);
+      const schedules = (result.stdout + result.stderr).split(/\r?\n/).filter(line => line.startsWith("MilkDrop "));
+      expect(schedules).toHaveLength(1);
+      expect(schedules[0]).toMatch(/^MilkDrop 0\.0s (tunnel-race|mandelbox-explorer)$/);
+      chosen.push(schedules[0]!);
+    }
+    expect(chosen[0]).toBe(chosen[1]);
+  }, 270_000);
+
+  test("renders landscape with one held preset through the real browser engine and encodes Full HD60", async () => {
     const output = join(directory, "landscape.mp4");
     // No browser mock and no skip: a missing Chrome installation must fail
     // with the backend's actionable VISU_CHROME_PATH guidance.
@@ -157,6 +194,7 @@ describe("MilkDrop engine end to end", () => {
       "--ratio", "16:9", "--start", "7", "--duration", "3", "--fade", "0.25",
       "--title", "RESONANCE", "--artist", "VISU VISU"], 300_000);
     expect(result.stdout + result.stderr).toMatch(/milkdrop/i);
+    verifyHeldSongPreset(result.stdout + result.stderr);
     await verifyContainer(output, 1920, 1080, 3);
     const frames = await bytes(["-ss", "1", "-i", output, "-t", "1", "-map", "0:v:0",
       "-vf", "crop=1536:432:192:360,scale=96:54,format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "-"]);
@@ -188,11 +226,7 @@ describe("MilkDrop engine end to end", () => {
     const result = await command(process.execPath, cliArgs, 720_000);
     expect(result.stdout + result.stderr).toMatch(/milkdrop/i);
     expect(result.stdout + result.stderr).toContain("1800 frames");
-    const schedule = (result.stdout + result.stderr).split("\n").find(line => line.startsWith("MilkDrop ")) ?? "";
-    const transitions = Array.from(schedule.matchAll(/(\d+\.\d+)s ([\w-]+)/g));
-    expect(transitions.length).toBeGreaterThan(1);
-    expect(new Set(transitions.map(item => item[2])).size).toBeGreaterThan(1);
-    expect(transitions.some(item => Number(item[1]) > 0 && Number(item[1]) < duration)).toBe(true);
+    verifyHeldSongPreset(result.stdout + result.stderr);
     await verifyContainer(output, 1080, 1920, duration);
 
     const motion = await bytes(["-ss", "7", "-i", output, "-t", "8", "-map", "0:v:0",

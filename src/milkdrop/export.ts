@@ -67,9 +67,9 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
   const promo = request.config.visual.mode === "promo";
   if (promo && !artwork?.thumbnail) throw new Error("Promo mode requires a cover image.");
   const customPresets = request.config.visual.milkdropPresets ?? [];
-  const selected = customPresets.length ? customPresets : promo ? ["tunnel-race", "mandelbox-explorer"] : [];
-  const plan = planMilkdrop(analysis, seed, request.start, totalFrames, fps,
-    selected.length ? selected : [...MILKDROP_DEFAULT_PRESET_IDS], selected.length > 0);
+  const candidates = customPresets.length ? customPresets
+    : promo ? ["tunnel-race", "mandelbox-explorer"] : MILKDROP_DEFAULT_PRESET_IDS;
+  const plan = planMilkdrop(analysis, request.config.visual.seed, request.start, totalFrames, fps, candidates);
   const build = await Bun.build({ entrypoints: [resolve(import.meta.dir, "browser.js")], target: "browser", minify: true });
   if (!build.success || !build.outputs[0]) throw new Error(`Could not build MilkDrop runtime: ${build.logs.join("\n")}`);
   const [script, pcm] = await Promise.all([build.outputs[0].arrayBuffer(),
@@ -155,8 +155,10 @@ export async function renderMilkdrop(request: RenderRequest, analysis: AudioAnal
       ...(request.fadeInSeconds === undefined ? {} : { fadeInSeconds: request.fadeInSeconds }),
       ...(request.fadeOutSeconds === undefined ? {} : { fadeOutSeconds: request.fadeOutSeconds }),
       frameCount: totalFrames, inputWidth: width, inputHeight: height, overwrite: request.overwrite });
-    console.log(`MilkDrop ${plan.schedule.map(item => `${Math.max(0, (item.frame - plan.outputStartFrame) / fps).toFixed(1)}s ${item.preset}`).join(" → ")}`);
-    if (selected.length) console.log(`Presets  ${selected.map(id => MILKDROP_PRESETS.find(preset => preset.id === id)!.name).join(" → ")}`);
+    const preset = plan.schedule[0].preset;
+    console.log(`MilkDrop 0.0s ${preset}`);
+    console.log(`Preset   ${MILKDROP_PRESETS.find(item => item.id === preset)!.name}`);
+    console.log(`Song seed ${request.config.visual.seed}`);
     startedAt = performance.now();
     await browser.evaluate("window.milkdrop.renderAll()");
     if (received !== totalFrames) throw new Error(`MilkDrop produced ${received} of ${totalFrames} frames`);
