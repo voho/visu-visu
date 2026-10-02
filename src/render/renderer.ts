@@ -333,7 +333,7 @@ export class VisualizerRenderer {
     };
   }
 
-  render(analysis: AudioAnalysis, time: number): Buffer {
+  render(analysis: AudioAnalysis, time: number, externalBackground?: Canvas): Buffer {
     const state = this.frameState(analysis, time);
     const { frame, motion, momentum, section, presence, visual, pose, filaments, hits, signalBand, lights } = state;
     this.surfaceFragments.update(analysis, time, captureTime => this.captureFragmentSource(analysis, captureTime));
@@ -354,6 +354,7 @@ export class VisualizerRenderer {
       analysis, state,
       coverCamera ? { ...coverOptions, camera: coverCamera } : coverOptions,
       emberDrive,
+      externalBackground,
     );
     // The readouts sit in the band below the graph, on the main canvas and
     // off the graph camera, so the sculpture can never cover them.
@@ -405,10 +406,13 @@ export class VisualizerRenderer {
     state: FrameState,
     coverOptions: ArtworkDrawOptions,
     emberDrive: EmberDrive,
+    externalBackground?: Canvas,
   ): void {
     const output = this.context;
     const { time, dynamics, visual, effects, momentum, presence } = state;
-    if (this.artwork) {
+    if (externalBackground) {
+      output.drawImage(externalBackground, 0, 0, this.width, this.height);
+    } else if (this.artwork) {
       this.drawCoverRoom(output, this.artwork, time, coverOptions);
     } else {
       this.drawNebulaRoom(output, analysis, time, visual, state.choreography, state.motion);

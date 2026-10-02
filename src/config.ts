@@ -19,6 +19,7 @@ export const DEFAULT_CONFIG: ProjectConfig = {
     artist: "",
   },
   visual: {
+    engine: "resonance",
     imagePath: "",
     lighting: 0.65,
     seed: "auto",
@@ -123,6 +124,10 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
     throw new Error("output.width and output.height must be even for H.264 encoding");
   }
   const imagePath = stringValue(visual.imagePath, "", "visual.imagePath").trim();
+  const engine = stringValue(visual.engine, "resonance", "visual.engine");
+  if (engine !== "resonance" && engine !== "milkdrop") {
+    throw new Error('visual.engine / --engine must be "resonance" or "milkdrop"');
+  }
   // Validate without resolving here: JSON paths belong to their config's directory.
   if (imagePath) resolveArtworkPath(imagePath);
 
@@ -161,6 +166,7 @@ export function parseProjectConfig(value: unknown): ProjectConfig {
       artist: stringValue(text.artist, DEFAULT_CONFIG.text.artist, "text.artist").trim(),
     },
     visual: {
+      engine,
       imagePath,
       lighting: boundedNumber(visual.lighting, DEFAULT_CONFIG.visual.lighting ?? 0.65, "visual.lighting", 0, 1),
       seed: stringValue(visual.seed, DEFAULT_CONFIG.visual.seed, "visual.seed").trim() || "auto",

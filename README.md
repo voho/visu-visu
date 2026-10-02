@@ -1,6 +1,6 @@
 # visu-visu
 
-`visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first, then renders every video frame from absolute time, cached features, and a seeded visual plan.
+`visu-visu` turns a song into a deterministic, audio-reactive music video. It analyzes the full track first. The default Resonance engine renders frames from absolute time, cached features and a seeded visual plan; the optional MilkDrop engine adds evolving shader feedback beneath that scene.
 
 The initial preset is **Resonance**. With a cover image, the cover becomes the room: the illustration fills the frame at its real colours on a base of its own darkest swatch, drifts slowly between its brightest and its most colourful regions, and pushes in and brightens around every drop. A sculpture of 72 harmonic filaments stands inside it, drawn in the cover's own warm and cool pigments (bass strands warm, treble strands cool), small and wispy in quiet passages, large and bright at peaks, and leaning into every kept kick with the momentum of something heavy. The music is legible in two readouts in the bottom band: a 32-bar spectrum strip running from warm bass to cool treble, and a floor oscilloscope with phosphor persistence. Every hit is one thing: a coloured ripple ring from the object's core plus a rate-limited warm lift with an explicit flash budget. The cover's own sparks float as soft ember bokeh on two parallax planes, the video visibly begins and ends, and the title lockup stays centred and readable throughout.
 
@@ -71,6 +71,43 @@ bun run preview -- ./song.mp3 --overwrite
 ```
 
 The preview script still writes a `1920×1080` delivery file, but renders its Canvas scene at half scale and uses a faster quality profile. Set `--start 45` to inspect a later section.
+
+
+## MilkDrop engine
+
+Use `--engine milkdrop` to put actual MilkDrop-compatible visuals behind the Resonance sculpture. [Butterchurn](https://github.com/jberg/butterchurn) runs the preset equations, warped framebuffer feedback and blended transitions, giving the room rotating vortices, folded tunnels, flowing ribbons, particles and fractal motion. The existing textured sculpture, ghosts, fragments, embers, spectrum, oscilloscope and centered cover/title/artist group remain in front. The default `--engine resonance` stays available without a browser.
+
+![Butterchurn folded tunnel behind the Resonance sculpture](./docs/showcase-milkdrop.png)
+
+Frame from a native Full HD60 export using the bundled audio loop, repeated to demonstrate a 30-second sequence of preset transitions.
+
+```sh
+bun run render -- ./song.wav --engine milkdrop --image ./cover.png \
+  --title "Night Signal" --artist "Artist Name" --output ./renders/milkdrop.mp4
+bun run clip -- ./song.wav --engine milkdrop --image ./cover.png --artist "Artist Name"
+# Equivalent shortcuts:
+bun run render:milkdrop -- ./song.wav --artist "Artist Name"
+bun run clip:milkdrop -- ./song.wav --artist "Artist Name"
+```
+
+Install Google Chrome or Chromium for this engine. The exporter finds a system installation, or uses the executable named by `VISU_CHROME_PATH`. It launches its own temporary headless browser, without using your browser profile. Assets and raw frames travel only through a temporary localhost server; your media is not uploaded. Full HD60, quality profiles, audio, fades and automatic portrait highlight selection use the same delivery settings as ordinary renders.
+
+A seeded musical schedule selects from eight presets, favoring different families with bass, mids, treble and section energy. It avoids repeats until the selection cycles, changes roughly every 8–13 seconds, and blends over 2.5–4 seconds. A 30-second output includes at least three different presets. Their original names and credits are retained:
+
+| ID | Preset |
+| --- | --- |
+| `vortex` | Geiss — Vortex 1 |
+| `ribbons` | Geiss — Ribbons |
+| `cosmic-dust` | Geiss — Cosmic Dust 2 |
+| `fog-tunnel` | Geiss — Fog Tunnel |
+| `julia-fractal` | Geiss — Julia Fractal 3 |
+| `plasma` | Geiss — Plasma 2 |
+| `folded-tunnel` | Flexi + Martin — tunnel of supraschismatika |
+| `moebius` | Flexi — motion blurred moebius fractal — early alpha version |
+
+The final MilkDrop light is remapped to the cover's palette, or the seeded palette without a cover, and shaded near the credits. The cover stays behind it. Low-flash mode softens this additional layer; the original presets do not carry the Resonance engine's measured global flash bound. This path uses pinned Butterchurn **2.6.7** and preset collection **2.4.7**, with [third-party attribution and license notices](./docs/third-party.md). It supports these MilkDrop 2-compatible presets, not MilkDrop3-specific shaders or `.milk2` loading.
+
+Feedback frames render sequentially from real 44.1 kHz stereo PCM, with a fixed frame clock and seeded randomness. An excerpt simulates up to four seconds before its requested start, then writes only the requested frames. This bounded warmup means an independently rendered clip can have different feedback history from the same section of a full-song render. Repeating the same job in the same browser/GPU environment is reproducible; byte-identical output across different GPUs is not promised. The live `lighting:preview` command remains the Resonance preview.
 
 ## Input artwork
 
@@ -198,7 +235,7 @@ The analysis contains time-indexed RMS, peak, a log-frequency spectrum, bass/mid
 
 Cached analysis is bound to the exact source file as well as its decoded PCM. The current analysis version remains **2**; regenerate older versions with `bun run analyze`. A cache must also match the output frame rate, so regenerate a 24 or 30 fps cache for a 60 fps render. The renderer rejects a cache paired with another audio file, malformed feature values, unsupported versions, or inconsistent frame counts. JSON caches are capped at 128 MiB; longer-form sets should currently be analyzed as part of the render instead of saved.
 
-With the same decoded audio, input image bytes (if supplied), bundled material source, settings, seed, renderer version, and runtime environment, the renderer generates the same RGBA frame sequence. The current renderer version is **23**; analysis remains at version **2**. The automatic seed is derived from decoded PCM, output settings and the renderer version, so a renderer version bump also re-rolls the seeded plans (filaments, embers, nebula lobes, dither) of `auto`-seeded renders. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
+With the same decoded audio, input image bytes (if supplied), bundled material source, settings, seed, renderer version and runtime environment, the default Resonance renderer generates the same RGBA frame sequence. The current renderer version is **23**; analysis remains at version **2**. The automatic seed is derived from decoded PCM, output settings and the renderer version, so a renderer version bump also re-rolls the seeded plans (filaments, embers, nebula lobes, dither) of `auto`-seeded renders. An explicit `--seed` makes visual exploration intentional and repeatable. System font rasterization and native codec implementations can still produce small byte-level differences across operating systems.
 
 ## Project configuration
 
@@ -226,6 +263,7 @@ bun run render -- ./song.wav --config ./visu.config.json
     "artist": ""
   },
   "visual": {
+    "engine": "resonance",
     "seed": "auto",
     "imagePath": "",
     "lighting": 0.65,
@@ -238,6 +276,8 @@ bun run render -- ./song.wav --config ./visu.config.json
   }
 }
 ```
+
+`visual.engine` selects `resonance` (the default) or `milkdrop`; `--engine` overrides it.
 
 `visual.intensity` scales every light layer (bloom, filaments, hit rings, lift, embers). `bokehCount` is the number of embers, split between the far and the near plane. `grain` is the strength of a seeded luminance dither added before the vignette (at `0.03` at most two levels per pixel, enough to break banding on the upscaled cover); `0` disables it. `vignette` applies only without a cover, tinted in the palette's darkest swatch; the cover carries its own baked corner fade. `lowFlash` (default `true`) is the flash policy described above: it never caps geometry, halves light pulses and caps luminance transients at 0.5, ramps hit light in over 50 ms and keeps the per-hit lift under +0.05 mean luma, with hits rate-limited to one per 0.34 seconds by the plan in either mode.
 
@@ -258,7 +298,7 @@ Dimensions are rounded to even pixels for broadly compatible H.264 output.
 
 `fadeSeconds` controls synchronized picture-to-black and audio-to-silence ramps at both ends. Audio is timestamp-reset after source seeking, padded if frame quantization extends past the available source by a fraction of a frame, and trimmed to the exact video duration before fading.
 
-`renderScale` controls the internal Canvas resolution independently of the encoded resolution. Final quality defaults to `1`, so Full HD is drawn natively at `1920×1080`. Quality presets replace the encoding settings and choose a render scale:
+`renderScale` controls the internal rendering resolution independently of the encoded resolution, including both the WebGL background and Canvas foreground when using MilkDrop. Final quality defaults to `1`, so Full HD is drawn natively at `1920×1080`. Quality presets replace the encoding settings and choose a render scale:
 
 | Quality | Render scale | CRF | H.264 preset | Video ceiling |
 | --- | ---: | ---: | --- | ---: |
@@ -329,6 +369,8 @@ bun run test:e2e
 ```
 
 The automated clip E2E generates a longer audio fixture with a known drop and passes a busy cover image through the public `clip --image` CLI. It checks a 30-second portrait MP4, the drop three seconds into the excerpt, all 1,800 frames at 60 fps, H.264/AAC encoding, matching audio/video duration, song and artist metadata, and decoded picture/audio fades. Both credit lines must remain visible beside the cover in a decoded 360-pixel-wide portrait preview. The test distinguishes the colorful thumbnail from text ink, checks the combined group is centered, and measures fades on the artist text independently. Output uses the default 1080×1920 delivery size with a quarter-scale internal render to limit test time. This verifies full-length clip selection and export; `bun run test:clip` is the shorter, six-second real-audio smoke render for visual inspection. Both require FFmpeg and FFprobe on `PATH`. Bare `bun test` discovers both suites, including the longer E2E.
+
+`bun run test:e2e:milkdrop` also requires Chrome/Chromium. It exercises the actual MilkDrop engine through a landscape render and a 30-second portrait clip, checking preset changes, frame motion, cover colors, readable credits, encoding and synchronized fades. A separate transport regression sends 600 native Full HD RGBA frames through the browser connection, checks their integrity and backpressure, and verifies startup errors and browser cleanup.
 
 ### Measuring a change
 

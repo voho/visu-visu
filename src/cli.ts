@@ -40,6 +40,7 @@ Render options:
       --fps <number>        Override frame rate (12–60, default: 60)
       --render-scale <n>    Internal resolution scale (0.25–1, final default: 1)
       --seed <value>        Reproducible visual seed (default: PCM-derived)
+      --engine <name>       resonance (default) or milkdrop (requires Chrome)
       --title <text>        On-screen and file metadata title
       --artist <text>       On-screen and file metadata artist
       --image <file>        Local artwork; softened, masked, and used for colors
@@ -60,7 +61,7 @@ Clip options (portrait Full HD60, up to 30 seconds):
   -o, --output <file>       Output MP4 (default: <song>.clip.mp4)
       --title / --artist    Override audio tags; artist is required if untagged
   Also accepts --config, --analysis, --save-analysis, --resolution, --fps,
-  --render-scale, --seed, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
+  --render-scale, --seed, --engine, --image, --lighting, --quality, and --overwrite. Aspect ratio is always 9:16.
   Short sources use their available length. No clear drop: use sustained energy.
 
 Analyze options:
@@ -112,6 +113,7 @@ export function overrideConfig(
     fps?: string;
     renderScale?: string;
     seed?: string;
+    engine?: string;
     title?: string;
     artist?: string;
     image?: string;
@@ -149,6 +151,12 @@ export function overrideConfig(
   const bands = numericOption(options.bands, "bands");
   if (bands !== undefined) mutable.visual.spectrumBands = bands;
   if (options.seed !== undefined) mutable.visual.seed = options.seed;
+  if (options.engine !== undefined) {
+    if (options.engine !== "resonance" && options.engine !== "milkdrop") {
+      throw new Error('--engine must be "resonance" or "milkdrop"');
+    }
+    mutable.visual.engine = options.engine;
+  }
   if (options.title !== undefined) mutable.text.title = options.title;
   if (options.artist !== undefined) mutable.text.artist = options.artist;
   if (options.image !== undefined) mutable.visual.imagePath = resolveArtworkPath(options.image);
@@ -229,6 +237,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       resolution: { type: "string" },
       "render-scale": { type: "string" },
       seed: { type: "string" },
+      engine: { type: "string" },
       title: { type: "string" },
       artist: { type: "string" },
       image: { type: "string" },
@@ -265,6 +274,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       ? {}
       : { renderScale: values["render-scale"] }),
     ...(values.seed === undefined ? {} : { seed: values.seed }),
+    ...(values.engine === undefined ? {} : { engine: values.engine }),
     ...(values.title === undefined ? {} : { title: values.title }),
     ...(values.artist === undefined ? {} : { artist: values.artist }),
     ...(values.image === undefined ? {} : { image: values.image }),
@@ -348,6 +358,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
         renderedDuration, fadeInSeconds, fadeOutSeconds,
         title: config.text.title, artist: config.text.artist,
         imagePath: config.visual.imagePath ?? "",
+        engine: config.visual.engine ?? "resonance",
       }, null, 2));
       return;
     }
@@ -364,7 +375,7 @@ async function runRender(args: string[], clip = false): Promise<void> {
       ? "native"
       : `${internalSize.width}x${internalSize.height} internal`;
   log(
-    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · resonance conductor`,
+    `Render   ${config.output.width}x${config.output.height} ← ${scaling} · ${config.output.fps} fps · ${config.visual.engine === "milkdrop" ? "MilkDrop / Butterchurn" : "resonance conductor"}`,
   );
   let lastPercent = -1;
   const result = await renderVideo(

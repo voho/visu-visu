@@ -63,6 +63,7 @@ export function resolveRenderSeed(config: ProjectConfig, analysis: AudioAnalysis
       config.output.fps,
       config.visual.spectrumBands,
       RENDERER_VERSION,
+      ...(config.visual.engine === "milkdrop" ? ["milkdrop-1"] : []),
     ].join(":"),
   ).slice(0, 16);
 }
@@ -90,6 +91,10 @@ export async function renderVideo(
   const renderSize = renderDimensions(request.config);
   // Decode before opening the output: a bad image must not truncate an existing MP4.
   const artwork = await prepareArtwork(request.config.visual.imagePath, renderSize.width, renderSize.height);
+  if (request.config.visual.engine === "milkdrop") {
+    const { renderMilkdrop } = await import("../milkdrop/export.js");
+    return await renderMilkdrop(request, analysis, { duration, totalFrames, seed, renderSize, artwork }, onProgress);
+  }
   const renderer = new VisualizerRenderer(request.config, seed, renderSize, artwork);
   const encoder = await FfmpegEncoder.create({
     audioPath: request.audioPath,
