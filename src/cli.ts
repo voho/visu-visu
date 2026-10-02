@@ -20,6 +20,7 @@ import {
 import { renderVideo, validateRenderAnalysis } from "./render/render.js";
 import { resolveFadeDurations } from "./render/encoder.js";
 import { prepareArtwork } from "./render/artwork.js";
+import { runThumbnail } from "./thumbnail-command.js";
 import type { ProjectConfig } from "./types.js";
 
 const HELP = `
@@ -29,6 +30,7 @@ Usage:
   bun run render -- <song> [options]
   bun run analyze -- <song> [options]
   bun run clip -- <song> [options]
+  bun run thumbnail -- <song | folder> [options]
 
 Render options:
   -o, --output <file>       Output MP4 (default: <song>.visual.mp4)
@@ -73,6 +75,16 @@ Analyze options:
       --fps <number>        Analysis frame rate
       --bands <number>      Spectrum band count (16–128)
 
+Thumbnail options (3840x2160 JPEG, less than 2 MB):
+      --artist <text>       Artist credit, preserving case; otherwise read audio tags
+      --title <text>        Single-song title (default: filename, or read audio title tag)
+      --image <file>        Single-song cover (default: same-named image beside audio)
+  -o, --output <file>       Single-song JPEG (default: <song>.youtube.jpg)
+      --output-dir <dir>    Output folder (batch default: <input>/thumbnails)
+  -y, --overwrite           Replace existing JPEG outputs
+  Folder input processes WAV files directly inside it and requires a matching
+  PNG, JPEG, WebP or AVIF for every song. All inputs are checked before writing.
+
 Examples:
   bun run render -- ./song.wav --title "Night Signal" --artist "Vojta"
   bun run render:promo -- ./song.wav --image ./cover.png --title "Night Signal" --artist "Vojta"
@@ -80,6 +92,8 @@ Examples:
   bun run clip -- ./song.mp3 --title "Night Signal" --artist "Vojta"
   bun run clip -- ./song.mp3 --artist "Vojta" --drop 92.5 --dry-run
   bun run analyze -- ./song.flac -o ./song.analysis.json
+  bun run thumbnail -- ./song.wav --artist "voho"
+  bun run thumbnail -- ./songs --artist "voho" --output-dir ./thumbnails
 `;
 
 const sharedOptions = {
@@ -438,6 +452,10 @@ async function main(): Promise<void> {
   }
   if (command === "render" || command === "clip") {
     await runRender(args, command === "clip");
+    return;
+  }
+  if (command === "thumbnail") {
+    await runThumbnail(args, HELP);
     return;
   }
   throw new Error(`Unknown command "${command}". Run with --help for usage.`);

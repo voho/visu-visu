@@ -1,6 +1,6 @@
-# Promo typography
+# Promo and thumbnail typography
 
-Promo titles use **Cormorant Garamond** (weight 600); artist names use **Manrope** (weight 500). Both variable TrueType fonts are bundled so offline renders use consistent typography across systems.
+Promo and YouTube thumbnail titles use **Cormorant Garamond** (weight 600); artist names use **Manrope** (weight 500). Both variable TrueType fonts are bundled so offline renders use consistent typography across systems.
 
 Downloaded from the [Google Fonts repository](https://github.com/google/fonts) on 2026-10-02:
 

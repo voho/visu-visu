@@ -94,6 +94,26 @@ The complete cover supplies the palette for the background and musical readouts.
 
 Default outputs are `<song>.promo.mp4` and `<song>.promo.clip.mp4`. Full HD 60 fps, H.264/AAC, synchronized entrance/end fades, explicit seeds, analysis reuse and the existing quality profiles work as usual. Promo's bottom analyzer intentionally reaches the frame edge; unlike the standard composition, it does not reserve the lower player-control margin. Set `visual.mode` to `"promo"` in JSON to save this layout with a project.
 
+## YouTube cover images
+
+Generate a matching upload thumbnail independently of the video. The artwork supplies the palette and a softly darkened background, with a prominent cover, elegant song/artist typography and soft shadows. Output is a native **3840×2160 (16:9) JPEG under 2 MB**, matching [YouTube's recommended video-thumbnail resolution and mobile upload limit](https://support.google.com/youtube/answer/72431?hl=en). It uses the bundled fonts and local Canvas renderer; no Chrome, audio analysis or video encoding is needed.
+
+```sh
+# Same-named cover beside the song; title comes from its filename.
+bun run thumbnail -- "./Bad Boys.wav" --artist "voho"
+
+# Every WAV and matching cover directly inside a folder.
+bun run thumbnail -- "/Users/vojta/Downloads/voho" --artist "voho"
+
+# Override a single song's title, cover and destination.
+bun run thumbnail -- ./song.wav --artist "voho" --title "Night Signal" \
+  --image ./cover.png --output ./thumbnails/night-signal.youtube.jpg
+```
+
+Single-song output defaults to `<song>.youtube.jpg` beside the audio. Folder output defaults to `<folder>/thumbnails/<song>.youtube.jpg`; `--output-dir` changes the destination. Matching accepts PNG, JPG/JPEG, WebP and AVIF, ignoring filename and extension case. Multiple matching covers are rejected: select a cover with `--image` in a single-song command. Folder processing is nonrecursive and rejects song names that collide ignoring case. `--title`, `--image` and `--output` apply only to a single song.
+
+Artist case is preserved, including `voho`. With `--artist`, the title defaults to the filename stem and FFprobe is not used. Without `--artist`, FFprobe reads artist and title tags, falling back to the filename for an absent title; a missing artist is an error. An explicit `--title` always takes precedence. Every song, cover, credit and output destination is checked before the batch writes any thumbnails. Existing outputs require `--overwrite`; input songs and covers are always protected.
+
 ## MilkDrop engine
 
 Use `--engine milkdrop` to put actual MilkDrop-compatible visuals behind the Resonance sculpture. [Butterchurn](https://github.com/jberg/butterchurn) runs the preset equations, warped framebuffer feedback and blended transitions, giving the room rotating vortices, folded tunnels, flowing ribbons, particles and fractal motion. The existing textured sculpture, ghosts, fragments, embers, spectrum, oscilloscope and centered cover/title/artist group remain in front. The default `--engine resonance` stays available without a browser.

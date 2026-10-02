@@ -9,6 +9,7 @@
   },
   "scripts": {
     "analyze": "bun src/cli.ts analyze",
+    "thumbnail": "bun src/cli.ts thumbnail",
     "render": "bun src/cli.ts render",
     "render:promo": "bun src/cli.ts render --mode promo",
     "render:milkdrop": "bun src/cli.ts render --engine milkdrop",
